@@ -27,17 +27,22 @@ export function useWebRTC({
   roomId,
   role,
   active,
+  onMessage,
 }: {
   getSocket: () => Socket | null
   roomId: string | null
   role: WebRTCRole
   active: boolean
+  /** DataChannel message handler (file-transfer frames). Stored in a ref. */
+  onMessage: ((event: MessageEvent) => void) | null
 }) {
   const [rtcStatus, setRtcStatus] = useState<RtcStatus>('idle')
   const [rtcError, setRtcError] = useState<string | null>(null)
   const [attempt, setAttempt] = useState(0)
   const pcRef = useRef<RTCPeerConnection | null>(null)
   const channelRef = useRef<RTCDataChannel | null>(null)
+  const onMessageRef = useRef(onMessage)
+  onMessageRef.current = onMessage
 
   const retry = useCallback(() => {
     const socket = getSocket()
@@ -89,6 +94,8 @@ export function useWebRTC({
 
     const wireChannel = (channel: RTCDataChannel) => {
       channelRef.current = channel
+      channel.binaryType = 'arraybuffer'
+      channel.onmessage = (event) => onMessageRef.current?.(event)
       channel.onopen = () => {
         if (disposed) return
         window.clearTimeout(watchdog)

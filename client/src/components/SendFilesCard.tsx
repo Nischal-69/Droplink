@@ -4,6 +4,8 @@ import { ArrowRight, Check, Copy, Lock, Upload, X } from 'lucide-react'
 import DirectConnectionPanel from './DirectConnectionPanel'
 import FileTypeIcon from './FileTypeIcon'
 import PairingStatusBadge from './PairingStatusBadge'
+import TransferSender from './TransferSender'
+import { useFileTransfer } from '../hooks/useFileTransfer'
 import { usePairing } from '../hooks/usePairing'
 import { useWebRTC } from '../hooks/useWebRTC'
 import { formatBytes } from '../utils/formatBytes'
@@ -25,11 +27,13 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
   const [copied, setCopied] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const pairing = usePairing()
+  const transfer = useFileTransfer()
   const webrtc = useWebRTC({
     getSocket: pairing.getSocket,
     roomId: pairing.roomId,
     role: pairing.role === 'sender' ? 'sender' : null,
     active: continued && pairing.status === 'connected',
+    onMessage: transfer.handleChannelMessage,
   })
 
   const openPicker = () => {
@@ -40,6 +44,7 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
     const incoming = Array.from(list)
     if (incoming.length === 0) return
     pairing.leave()
+    transfer.reset()
     setFiles((prev) => [
       ...prev,
       ...incoming.map((file, i) => ({
@@ -75,6 +80,7 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
 
   const handleBackToFiles = () => {
     pairing.leave()
+    transfer.reset()
     setContinued(false)
   }
 
@@ -196,10 +202,11 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
                   rtcError={webrtc.rtcError}
                   onRetry={webrtc.retry}
                 >
-                  <p className="mx-auto mt-2 max-w-xs text-xs leading-relaxed text-muted">
-                    Ready to send {summary}. File transfer over the data
-                    channel comes next.
-                  </p>
+                  <TransferSender
+                    files={files}
+                    transfer={transfer}
+                    getChannel={webrtc.getChannel}
+                  />
                 </DirectConnectionPanel>
               </div>
             </>
@@ -289,6 +296,7 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
           type="button"
           onClick={() => {
             pairing.leave()
+            transfer.reset()
             onSwitchToReceive()
           }}
           className="flex-1 rounded-lg border border-border bg-white px-4 py-2.5 text-sm font-semibold hover:border-primary hover:text-primary"

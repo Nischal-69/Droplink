@@ -3,6 +3,8 @@ import type { ChangeEvent, FormEvent } from 'react'
 import { Lock } from 'lucide-react'
 import DirectConnectionPanel from './DirectConnectionPanel'
 import PairingStatusBadge from './PairingStatusBadge'
+import TransferReceiver from './TransferReceiver'
+import { useFileTransfer } from '../hooks/useFileTransfer'
 import { usePairing } from '../hooks/usePairing'
 import { useWebRTC } from '../hooks/useWebRTC'
 
@@ -73,11 +75,13 @@ export default function ReceiveFilesCard({ onSwitchToSend }: Props) {
   const pairing = usePairing()
   const [digits, setDigits] = useState('')
   const isConnected = pairing.status === 'connected'
+  const transfer = useFileTransfer()
   const webrtc = useWebRTC({
     getSocket: pairing.getSocket,
     roomId: pairing.roomId,
     role: pairing.role === 'receiver' ? 'receiver' : null,
     active: isConnected,
+    onMessage: transfer.handleChannelMessage,
   })
 
   const handleInputChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -91,6 +95,7 @@ export default function ReceiveFilesCard({ onSwitchToSend }: Props) {
 
   const handleDisconnect = () => {
     pairing.leave()
+    transfer.reset()
     setDigits('')
   }
 
@@ -123,10 +128,7 @@ export default function ReceiveFilesCard({ onSwitchToSend }: Props) {
                 rtcError={webrtc.rtcError}
                 onRetry={webrtc.retry}
               >
-                <p className="mx-auto mt-2 max-w-xs text-xs leading-relaxed text-muted">
-                  Stay on this screen — incoming files will appear here once
-                  transfer is implemented.
-                </p>
+                <TransferReceiver transfer={transfer} />
               </DirectConnectionPanel>
             </div>
             <button
@@ -187,6 +189,7 @@ export default function ReceiveFilesCard({ onSwitchToSend }: Props) {
           type="button"
           onClick={() => {
             pairing.leave()
+            transfer.reset()
             onSwitchToSend()
           }}
           className="flex-1 rounded-lg border border-border bg-white px-4 py-2.5 text-sm font-semibold hover:border-primary hover:text-primary"
