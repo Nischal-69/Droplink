@@ -28,10 +28,12 @@ const io = new Server(httpServer, {
 /**
  * Signaling-only pairing store.
  * Key: normalized 6-digit code ("482731"). Value: room record.
- * File bytes are NEVER sent through Socket.IO — only room/code/status events.
+ * File bytes are NEVER sent through Socket.IO — only room/code/status events
+ * plus WebRTC SDP/ICE signaling payloads.
  */
 const rooms = new Map();
 const socketToCode = new Map();
+const SIGNAL_TYPES = new Set(['offer', 'answer', 'ice', 'restart-request']);
 
 function normalizeCode(input) {
   return String(input ?? '').replace(/\D/g, '').slice(0, 6);
@@ -151,6 +153,20 @@ io.on('connection', (socket) => {
 
   socket.on('leave-room', () => {
     leaveRoom(socket, true);
+  });
+
+  // Relay WebRTC SDP/ICE signaling between the two paired peers.
+  // Payloads are session descriptions and ICE candidates only — never file data.
+  socket.on('signal', (message) => {
+    const type = message?.type;
+    const roomId = message?.roomId;
+    const payload = message?.payload;
+    if (!SIGNAL_TYPES.has(type) || typeof roomId !== 'string' || payload === undefined) return;
+    const code = socketToCode.get(socket.id);
+    const room = code ? rooms.get(code) : null;
+    if (!room || room.roomId !== roomId) return;
+    if (socket.id !== room.hostId && socket.id !== room.guestId) return;
+    socket.to(roomId).emit('signal', { type, payload, from: socket.id });
   });
 
   socket.on('disconnect', () => {

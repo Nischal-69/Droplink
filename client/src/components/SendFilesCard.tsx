@@ -1,9 +1,11 @@
 import { useRef, useState } from 'react'
 import type { ChangeEvent, DragEvent } from 'react'
 import { ArrowRight, Check, Copy, Lock, Upload, X } from 'lucide-react'
+import DirectConnectionPanel from './DirectConnectionPanel'
 import FileTypeIcon from './FileTypeIcon'
 import PairingStatusBadge from './PairingStatusBadge'
 import { usePairing } from '../hooks/usePairing'
+import { useWebRTC } from '../hooks/useWebRTC'
 import { formatBytes } from '../utils/formatBytes'
 
 type StoredFile = {
@@ -23,6 +25,12 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
   const [copied, setCopied] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const pairing = usePairing()
+  const webrtc = useWebRTC({
+    getSocket: pairing.getSocket,
+    roomId: pairing.roomId,
+    role: pairing.role === 'sender' ? 'sender' : null,
+    active: continued && pairing.status === 'connected',
+  })
 
   const openPicker = () => {
     inputRef.current?.click()
@@ -178,14 +186,22 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
         <div className="mt-5 rounded-lg border border-border bg-background p-6 text-center">
           {pairing.status === 'connected' ? (
             <>
-              <span className="mx-auto flex h-11 w-11 items-center justify-center rounded-lg bg-success/10">
-                <Check size={22} className="text-success" aria-hidden />
-              </span>
-              <p className="mt-3 text-sm font-semibold">Receiver connected</p>
+              <p className="text-sm font-semibold text-dark">Receiver connected</p>
               <p className="mt-1 text-xs leading-relaxed text-muted">
-                {summary} — ready for direct transfer. File sending via WebRTC
-                is not implemented yet.
+                {summary} — paired via code {pairing.code ?? ''}.
               </p>
+              <div className="mt-4 border-t border-border pt-4">
+                <DirectConnectionPanel
+                  rtcStatus={webrtc.rtcStatus}
+                  rtcError={webrtc.rtcError}
+                  onRetry={webrtc.retry}
+                >
+                  <p className="mx-auto mt-2 max-w-xs text-xs leading-relaxed text-muted">
+                    Ready to send {summary}. File transfer over the data
+                    channel comes next.
+                  </p>
+                </DirectConnectionPanel>
+              </div>
             </>
           ) : pairing.status === 'disconnected' ? (
             <>
@@ -261,7 +277,10 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
       <div className="mt-5 flex flex-col gap-3 sm:flex-row">
         <button
           type="button"
-          onClick={openPicker}
+          onClick={() => {
+            if (continued) handleBackToFiles()
+            else openPicker()
+          }}
           className="flex-1 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90"
         >
           Send Files

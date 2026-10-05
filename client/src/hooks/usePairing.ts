@@ -170,6 +170,9 @@ export function usePairing() {
     setError(null)
   }, [])
 
+  /** Raw signaling socket for WebRTC handshake (signaling only). */
+  const getSocket = useCallback((): Socket | null => socketRef.current, [])
+
   useEffect(() => {
     return () => {
       socketRef.current?.disconnect()
@@ -177,5 +180,5 @@ export function usePairing() {
     }
   }, [])
 
-  return { status, role, roomId, code, error, createRoom, joinRoom, leave }
+  return { status, role, roomId, code, error, createRoom, joinRoom, leave, getSocket }
 }

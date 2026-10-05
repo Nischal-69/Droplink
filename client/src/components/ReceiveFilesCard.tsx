@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
-import { Check, Lock } from 'lucide-react'
+import { Lock } from 'lucide-react'
+import DirectConnectionPanel from './DirectConnectionPanel'
 import PairingStatusBadge from './PairingStatusBadge'
 import { usePairing } from '../hooks/usePairing'
+import { useWebRTC } from '../hooks/useWebRTC'
 
 type Props = {
   onSwitchToSend: () => void
@@ -70,6 +72,13 @@ function DeviceIllustration() {
 export default function ReceiveFilesCard({ onSwitchToSend }: Props) {
   const pairing = usePairing()
   const [digits, setDigits] = useState('')
+  const isConnected = pairing.status === 'connected'
+  const webrtc = useWebRTC({
+    getSocket: pairing.getSocket,
+    roomId: pairing.roomId,
+    role: pairing.role === 'receiver' ? 'receiver' : null,
+    active: isConnected,
+  })
 
   const handleInputChange = (event: ChangeEvent<HTMLInputElement>) => {
     setDigits(event.target.value.replace(/\D/g, '').slice(0, 6))
@@ -85,7 +94,6 @@ export default function ReceiveFilesCard({ onSwitchToSend }: Props) {
     setDigits('')
   }
 
-  const isConnected = pairing.status === 'connected'
   const isConnecting = pairing.status === 'connecting'
 
   return (
@@ -106,16 +114,21 @@ export default function ReceiveFilesCard({ onSwitchToSend }: Props) {
 
         {isConnected && pairing.code ? (
           <div className="text-center">
-            <span className="mx-auto flex h-11 w-11 items-center justify-center rounded-lg bg-success/10">
-              <Check size={22} className="text-success" aria-hidden />
-            </span>
-            <p className="mt-3 text-sm font-semibold">Connected to sender</p>
-            <p className="mt-1 font-mono text-2xl font-bold tracking-widest text-dark">
-              {pairing.code}
+            <p className="text-sm font-semibold text-dark">
+              Connected to sender <span className="font-mono">{pairing.code}</span>
             </p>
-            <p className="mt-1 text-xs leading-relaxed text-muted">
-              Paired and ready. File receiving via WebRTC is not implemented yet.
-            </p>
+            <div className="mt-3">
+              <DirectConnectionPanel
+                rtcStatus={webrtc.rtcStatus}
+                rtcError={webrtc.rtcError}
+                onRetry={webrtc.retry}
+              >
+                <p className="mx-auto mt-2 max-w-xs text-xs leading-relaxed text-muted">
+                  Stay on this screen — incoming files will appear here once
+                  transfer is implemented.
+                </p>
+              </DirectConnectionPanel>
+            </div>
             <button
               type="button"
               onClick={handleDisconnect}
