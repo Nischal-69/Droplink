@@ -16,12 +16,33 @@ export const LOW_WATER_MARK = 256 * 1024
 /** Minimum gap between progress state updates. */
 export const PROGRESS_THROTTLE_MS = 120
 
+export type QueueEntry = {
+  fileId: string
+  name: string
+  size: number
+  mime: string
+}
+
 export type ControlMessage =
   | { kind: 'transfer-start'; transferId: string; fileCount: number; totalBytes: number }
+  | { kind: 'queue'; transferId: string; files: QueueEntry[] }
   | { kind: 'file-start'; transferId: string; fileId: string; name: string; size: number; mime: string }
   | { kind: 'file-end'; transferId: string; fileId: string }
   | { kind: 'transfer-complete'; transferId: string }
   | { kind: 'transfer-cancel'; transferId: string; fileId?: string }
+
+function isValidQueueEntry(entry: unknown): entry is QueueEntry {
+  if (!entry || typeof entry !== 'object') return false
+  const record = entry as Record<string, unknown>
+  return (
+    typeof record['fileId'] === 'string' &&
+    typeof record['name'] === 'string' &&
+    typeof record['size'] === 'number' &&
+    Number.isFinite(record['size']) &&
+    (record['size'] as number) >= 0 &&
+    typeof record['mime'] === 'string'
+  )
+}
 
 export function encodeControl(message: ControlMessage): string {
   return JSON.stringify(message)
@@ -41,6 +62,11 @@ export function decodeControl(raw: string): ControlMessage | null {
   switch (message['kind']) {
     case 'transfer-start':
       if (typeof message['fileCount'] !== 'number' || typeof message['totalBytes'] !== 'number') return null
+      break
+    case 'queue':
+      if (!Array.isArray(message['files']) || !(message['files'] as unknown[]).every(isValidQueueEntry)) {
+        return null
+      }
       break
     case 'file-start':
       if (
@@ -147,6 +173,19 @@ export async function transferFiles(
 
   channel.send(
     encodeControl({ kind: 'transfer-start', transferId, fileCount: files.length, totalBytes }),
+  )
+  // Full manifest up front so the receiver sees the complete queue immediately.
+  channel.send(
+    encodeControl({
+      kind: 'queue',
+      transferId,
+      files: files.map(({ id: fileId, file }) => ({
+        fileId,
+        name: file.name,
+        size: file.size,
+        mime: file.type || 'application/octet-stream',
+      })),
+    }),
   )
   for (const { id: fileId, file } of files) {
     if (aborted()) break

@@ -23,6 +23,8 @@ export type ReceivedFile = {
   receivedBytes: number
   done: boolean
   cancelled: boolean
+  /** Listed from the queue manifest but transfer has not started yet. */
+  waiting: boolean
   blobUrl: string | null
   /** Measured bytes/sec from actual chunk flow. */
   bps: number
@@ -104,7 +106,7 @@ export function useFileTransfer() {
     setReceived((prev) =>
       prev.map((item) =>
         item.fileId === fileId
-          ? { ...item, receivedBytes: assembly.received, done: true, blobUrl, bps: 0 }
+          ? { ...item, receivedBytes: assembly.received, done: true, blobUrl, bps: 0, waiting: false }
           : item,
       ),
     )
@@ -168,23 +170,46 @@ export function useFileTransfer() {
             })
             openFileRef.current = message.fileId
             setReceived((prev) => {
-              if (prev.some((item) => item.fileId === message.fileId)) return prev
-              return [
-                ...prev,
-                {
-                  fileId: message.fileId,
-                  name: message.name,
-                  size: message.size,
-                  mime: message.mime,
-                  receivedBytes: 0,
-                  done: message.size === 0,
-                  cancelled: false,
-                  blobUrl: null,
-                  bps: 0,
-                },
-              ]
+              const entry = {
+                fileId: message.fileId,
+                name: message.name,
+                size: message.size,
+                mime: message.mime,
+                receivedBytes: 0,
+                done: message.size === 0,
+                cancelled: false,
+                waiting: false,
+                blobUrl: null,
+                bps: 0,
+              }
+              if (prev.some((item) => item.fileId === message.fileId)) {
+                return prev.map((item) => (item.fileId === message.fileId ? entry : item))
+              }
+              return [...prev, entry]
             })
             if (message.size === 0) finalizeFile(message.fileId)
+            break
+          }
+          case 'queue': {
+            // Complete manifest up front — the full queue is visible immediately.
+            setReceived((prev) => {
+              const known = new Set(prev.map((item) => item.fileId))
+              const additions = message.files
+                .filter((entry) => !known.has(entry.fileId))
+                .map((entry) => ({
+                  fileId: entry.fileId,
+                  name: entry.name,
+                  size: entry.size,
+                  mime: entry.mime,
+                  receivedBytes: 0,
+                  done: false,
+                  cancelled: false,
+                  waiting: true,
+                  blobUrl: null,
+                  bps: 0,
+                }))
+              return additions.length > 0 ? [...prev, ...additions] : prev
+            })
             break
           }
           case 'file-end':
@@ -206,7 +231,7 @@ export function useFileTransfer() {
               if (openFileRef.current === target) openFileRef.current = null
               setReceived((prev) =>
                 prev.map((item) =>
-                  item.fileId === target ? { ...item, cancelled: true } : item,
+                  item.fileId === target ? { ...item, cancelled: true, waiting: false } : item,
                 ),
               )
             }

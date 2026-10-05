@@ -75,11 +75,19 @@ export default function TransferSender({ files, transfer, getChannel }: Props) {
 
       {renderLivePanel()}
 
-      <ul className="mt-3 flex flex-col gap-2" aria-label="Files to send">
+      <ul className="mt-3 flex flex-col gap-2" aria-label="Transfer queue">
         {files.map((item) => {
           const progress = transfer.sendProgress[item.id]
           const sent = progress?.sentBytes ?? 0
           const percent = progressPercent(sent, item.file.size)
+          const started = isSending || transfer.sendState === 'done'
+          const status = !started
+            ? null
+            : progress?.done
+              ? '100%'
+              : item.id === active?.id && isSending
+                ? `${Math.round(percent)}%`
+                : 'waiting'
           return (
             <li
               key={item.id}
@@ -90,12 +98,21 @@ export default function TransferSender({ files, transfer, getChannel }: Props) {
                   <FileTypeIcon fileName={item.file.name} mimeType={item.file.type} />
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium" title={item.file.name}>
-                    {item.file.name}
-                  </p>
+                  <div className="flex items-baseline justify-between gap-2">
+                    <p className="truncate text-sm font-medium" title={item.file.name}>
+                      {item.file.name}
+                    </p>
+                    {status && (
+                      <span
+                        className={`shrink-0 text-xs font-semibold ${status === 'waiting' ? 'text-muted' : 'text-dark'}`}
+                      >
+                        {status}
+                      </span>
+                    )}
+                  </div>
                   <p className="text-xs text-muted">
-                    {isSending || transfer.sendState !== 'idle'
-                      ? `${formatBytes(sent)} of ${formatBytes(item.file.size)} • ${Math.round(percent)}%`
+                    {started
+                      ? `${formatBytes(sent)} of ${formatBytes(item.file.size)}`
                       : formatBytes(item.file.size)}
                   </p>
                 </div>

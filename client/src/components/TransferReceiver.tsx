@@ -56,9 +56,17 @@ export default function TransferReceiver({ transfer }: { transfer: FileTransfer 
         </div>
       )}
 
-      <ul className="mt-2 flex flex-col gap-2" aria-label="Incoming files">
+      <ul className="mt-2 flex flex-col gap-2" aria-label="Transfer queue">
         {transfer.received.map((item) => {
           const percent = progressPercent(item.receivedBytes, item.size)
+          const status = item.cancelled
+            ? 'cancelled'
+            : item.done
+              ? '100%'
+              : item.waiting
+                ? 'waiting'
+                : `${Math.round(percent)}%`
+          const isWaiting = !item.done && !item.cancelled && item.waiting
           return (
             <li key={item.fileId} className="rounded-lg border border-border bg-background px-3 py-2.5">
               <div className="flex items-center gap-3">
@@ -66,15 +74,24 @@ export default function TransferReceiver({ transfer }: { transfer: FileTransfer 
                   <FileTypeIcon fileName={item.name} mimeType={item.mime} />
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium" title={item.name}>
-                    {item.name}
-                  </p>
+                  <div className="flex items-baseline justify-between gap-2">
+                    <p className="truncate text-sm font-medium" title={item.name}>
+                      {item.name}
+                    </p>
+                    <span
+                      className={`shrink-0 text-xs font-semibold ${isWaiting || item.cancelled ? 'text-muted' : 'text-dark'}`}
+                    >
+                      {status}
+                    </span>
+                  </div>
                   <p className="text-xs text-muted">
                     {item.cancelled
                       ? 'Cancelled by sender'
                       : item.done
-                        ? `${formatBytes(item.size)} • ${Math.round(percent)}%`
-                        : `${formatBytes(item.receivedBytes)} of ${formatBytes(item.size)} • ${Math.round(percent)}%`}
+                        ? formatBytes(item.size)
+                        : isWaiting
+                          ? `${formatBytes(item.size)} • queued`
+                          : `${formatBytes(item.receivedBytes)} of ${formatBytes(item.size)}`}
                   </p>
                 </div>
                 {item.done && !item.cancelled && (
