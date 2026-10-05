@@ -1,27 +1,35 @@
 import { useEffect, useState } from 'react'
+import { Lock } from 'lucide-react'
 import { io } from 'socket.io-client'
-
-type BackendStatus = 'checking' | 'online' | 'offline'
+import DevicesPanel from './components/DevicesPanel'
+import Footer from './components/Footer'
+import Header from './components/Header'
+import HowItWorks from './components/HowItWorks'
+import SharePanel from './components/SharePanel'
 
 function App() {
-  const [backendStatus, setBackendStatus] = useState<BackendStatus>('checking')
+  const [backendOnline, setBackendOnline] = useState(false)
+  const [socketConnected, setSocketConnected] = useState(false)
   const [socketId, setSocketId] = useState<string | null>(null)
 
   useEffect(() => {
     fetch('/api/health')
-      .then((res) => (res.ok ? res.json() : Promise.reject()))
-      .then(() => setBackendStatus('online'))
-      .catch(() => setBackendStatus('offline'))
+      .then((res) => {
+        setBackendOnline(res.ok)
+      })
+      .catch(() => setBackendOnline(false))
   }, [])
 
   useEffect(() => {
     const socket = io({ autoConnect: true })
 
     socket.on('connect', () => {
+      setSocketConnected(true)
       setSocketId(socket.id ?? null)
     })
 
     socket.on('disconnect', () => {
+      setSocketConnected(false)
       setSocketId(null)
     })
 
@@ -31,55 +39,40 @@ function App() {
   }, [])
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100">
-      <div className="mx-auto flex min-h-screen max-w-3xl flex-col items-center justify-center px-6 py-16 text-center">
-        <p className="rounded-full border border-sky-400/30 bg-sky-400/10 px-4 py-1 text-sm text-sky-300">
-          Same Wi-Fi • Peer-to-Peer • No server storage
-        </p>
-        <h1 className="mt-6 text-5xl font-bold tracking-tight">
-          Drop<span className="text-sky-400">Link</span>
-        </h1>
-        <p className="mt-4 max-w-xl text-slate-400">
-          A simple peer-to-peer file transfer app for devices on the same Wi-Fi
-          network. Files go directly between browsers — nothing is stored on the
-          server.
-        </p>
+    <div className="min-h-screen bg-background text-dark">
+      <Header backendOnline={backendOnline} socketConnected={socketConnected} />
 
-        <div className="mt-8 grid w-full gap-4 sm:grid-cols-2">
-          <div className="rounded-xl border border-slate-800 bg-slate-900 p-5 text-left">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">
-              Backend
-            </h2>
-            <p className="mt-2 text-lg font-medium">
-              {backendStatus === 'checking' && 'Checking…'}
-              {backendStatus === 'online' && '🟢 Online'}
-              {backendStatus === 'offline' && '🔴 Offline'}
-            </p>
-            <p className="mt-1 text-sm text-slate-500">
-              GET /api/health via Vite proxy
-            </p>
-          </div>
-
-          <div className="rounded-xl border border-slate-800 bg-slate-900 p-5 text-left">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">
-              Socket.IO
-            </h2>
-            <p className="mt-2 text-lg font-medium">
-              {socketId ? `🟢 Connected (${socketId.slice(0, 6)}…)` : '🔴 Disconnected'}
-            </p>
-            <p className="mt-1 text-sm text-slate-500">
-              Signaling ready for future P2P transfer
-            </p>
-          </div>
-        </div>
-
-        <div className="mt-8 rounded-xl border border-dashed border-slate-700 bg-slate-900/50 p-8 w-full">
-          <p className="text-slate-300 font-medium">File transfer coming soon</p>
-          <p className="mt-1 text-sm text-slate-500">
-            Project structure and signaling setup only — no transfer logic yet.
+      <main className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
+        <div className="mb-6 max-w-2xl">
+          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
+            Send files to nearby devices
+          </h1>
+          <p className="mt-2 flex items-start gap-1.5 text-sm leading-relaxed text-muted">
+            <Lock size={15} className="mt-0.5 shrink-0" aria-hidden />
+            Direct browser-to-browser transfer over your Wi-Fi. The server only
+            helps devices find each other.
           </p>
         </div>
-      </div>
+
+        <div className="grid items-start gap-6 lg:grid-cols-5">
+          <div className="lg:col-span-3">
+            <SharePanel />
+          </div>
+          <div className="lg:col-span-2">
+            <DevicesPanel
+              backendOnline={backendOnline}
+              socketConnected={socketConnected}
+              socketId={socketId}
+            />
+          </div>
+        </div>
+
+        <div className="mt-6">
+          <HowItWorks />
+        </div>
+      </main>
+
+      <Footer />
     </div>
   )
 }
