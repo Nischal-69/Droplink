@@ -1,0 +1,17 @@
+{
+  "name": "droplink-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "DropLink signaling server (Express + Socket.IO)",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "socket.io": "^4.8.1"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "name": "droplink",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DropLink — peer-to-peer file transfer on the same Wi-Fi network",
+  "scripts": {
+    "development": "concurrently \"npm run server\" \"npm run client\"",
+    "client": "npm run dev --prefix client",
+    "server": "npm run dev --prefix server",
+    "install:all": "npm install --prefix client && npm install --prefix server",
+    "build": "npm run build --prefix client"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
