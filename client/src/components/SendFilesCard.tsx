@@ -1,7 +1,9 @@
 import { useRef, useState } from 'react'
 import type { ChangeEvent, DragEvent } from 'react'
-import { ArrowLeft, ArrowRight, Check, Lock, Upload, X } from 'lucide-react'
+import { ArrowRight, Check, Copy, Lock, Upload, X } from 'lucide-react'
 import FileTypeIcon from './FileTypeIcon'
+import PairingStatusBadge from './PairingStatusBadge'
+import { usePairing } from '../hooks/usePairing'
 import { formatBytes } from '../utils/formatBytes'
 
 type StoredFile = {
@@ -18,7 +20,9 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
   const [files, setFiles] = useState<StoredFile[]>([])
   const [dragging, setDragging] = useState(false)
   const [continued, setContinued] = useState(false)
+  const [copied, setCopied] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+  const pairing = usePairing()
 
   const openPicker = () => {
     inputRef.current?.click()
@@ -27,6 +31,7 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
   const addFiles = (list: FileList | File[]) => {
     const incoming = Array.from(list)
     if (incoming.length === 0) return
+    pairing.leave()
     setFiles((prev) => [
       ...prev,
       ...incoming.map((file, i) => ({
@@ -54,6 +59,28 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
     setFiles((prev) => prev.filter((item) => item.id !== id))
   }
 
+  const handleContinue = () => {
+    setContinued(true)
+    setCopied(false)
+    void pairing.createRoom()
+  }
+
+  const handleBackToFiles = () => {
+    pairing.leave()
+    setContinued(false)
+  }
+
+  const handleCopyCode = async () => {
+    if (!pairing.code) return
+    try {
+      await navigator.clipboard.writeText(pairing.code)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1500)
+    } catch {
+      setCopied(false)
+    }
+  }
+
   const totalBytes = files.reduce((sum, item) => sum + item.file.size, 0)
   const summary = `${files.length} ${files.length === 1 ? 'file' : 'files'} • ${formatBytes(totalBytes)}`
 
@@ -62,7 +89,10 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
       aria-label="Send files"
       className="mt-8 w-full rounded-xl border border-border bg-white p-6 sm:p-8"
     >
-      <h2 className="text-center text-lg font-semibold">Send files</h2>
+      <div className="flex items-center justify-center gap-2">
+        <h2 className="text-center text-lg font-semibold">Send files</h2>
+        {continued && <PairingStatusBadge status={pairing.status} />}
+      </div>
 
       {!continued && (
         <>
@@ -134,7 +164,7 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
               </p>
               <button
                 type="button"
-                onClick={() => setContinued(true)}
+                onClick={handleContinue}
                 className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90"
               >
                 Continue <ArrowRight size={16} aria-hidden />
@@ -146,20 +176,84 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
 
       {continued && (
         <div className="mt-5 rounded-lg border border-border bg-background p-6 text-center">
-          <span className="mx-auto flex h-11 w-11 items-center justify-center rounded-lg bg-success/10">
-            <Check size={22} className="text-success" aria-hidden />
-          </span>
-          <p className="mt-3 text-sm font-semibold">{summary} ready</p>
-          <p className="mt-1 text-xs leading-relaxed text-muted">
-            Pairing via WebRTC coming soon. Files stay on this device — nothing
-            was uploaded.
-          </p>
+          {pairing.status === 'connected' ? (
+            <>
+              <span className="mx-auto flex h-11 w-11 items-center justify-center rounded-lg bg-success/10">
+                <Check size={22} className="text-success" aria-hidden />
+              </span>
+              <p className="mt-3 text-sm font-semibold">Receiver connected</p>
+              <p className="mt-1 text-xs leading-relaxed text-muted">
+                {summary} — ready for direct transfer. File sending via WebRTC
+                is not implemented yet.
+              </p>
+            </>
+          ) : pairing.status === 'disconnected' ? (
+            <>
+              <p className="text-sm font-semibold text-dark">Connection lost</p>
+              <p className="mt-1 text-xs leading-relaxed text-muted">
+                {pairing.error ?? 'The other device disconnected.'}
+              </p>
+              <button
+                type="button"
+                onClick={() => void pairing.createRoom()}
+                className="mt-4 w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90"
+              >
+                Get a new code
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="text-xs font-medium uppercase tracking-wide text-muted">
+                {pairing.status === 'connecting' ? 'Connecting' : 'Share this code'}
+              </p>
+              {pairing.status === 'connecting' || !pairing.code ? (
+                <p className="mt-3 flex items-center justify-center gap-2 text-sm text-muted">
+                  <span
+                    aria-hidden
+                    className="inline-block h-2 w-2 animate-pulse rounded-full bg-primary"
+                  />
+                  Connecting to signaling server...
+                </p>
+              ) : (
+                <>
+                  <p className="mt-1 font-mono text-4xl font-bold tracking-widest text-dark">
+                    {pairing.code}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleCopyCode}
+                    className="mx-auto mt-3 inline-flex items-center justify-center gap-1.5 rounded-lg border border-border bg-white px-4 py-2 text-sm font-semibold hover:border-primary hover:text-primary"
+                  >
+                    {copied ? (
+                      <>
+                        <Check size={15} aria-hidden /> Copied
+                      </>
+                    ) : (
+                      <>
+                        <Copy size={15} aria-hidden /> Copy Code
+                      </>
+                    )}
+                  </button>
+                  <p className="mt-3 flex items-center justify-center gap-2 text-sm text-muted">
+                    <span
+                      aria-hidden
+                      className="inline-block h-2 w-2 animate-pulse rounded-full bg-primary"
+                    />
+                    Waiting for receiver...
+                  </p>
+                </>
+              )}
+              {pairing.error && (
+                <p className="mt-2 text-xs text-danger">{pairing.error}</p>
+              )}
+            </>
+          )}
           <button
             type="button"
-            onClick={() => setContinued(false)}
-            className="mt-4 inline-flex items-center justify-center gap-1.5 rounded-lg border border-border bg-white px-4 py-2 text-sm font-semibold hover:border-primary hover:text-primary"
+            onClick={handleBackToFiles}
+            className="mt-4 inline-flex w-full items-center justify-center rounded-lg border border-border bg-white px-4 py-2 text-sm font-semibold hover:border-primary hover:text-primary"
           >
-            <ArrowLeft size={15} aria-hidden /> Back to files
+            Back to files
           </button>
         </div>
       )}
@@ -174,7 +268,10 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
         </button>
         <button
           type="button"
-          onClick={onSwitchToReceive}
+          onClick={() => {
+            pairing.leave()
+            onSwitchToReceive()
+          }}
           className="flex-1 rounded-lg border border-border bg-white px-4 py-2.5 text-sm font-semibold hover:border-primary hover:text-primary"
         >
           Receive Files
