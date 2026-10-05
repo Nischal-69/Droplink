@@ -1,6 +1,7 @@
 import { Check, RefreshCw, Send, X } from 'lucide-react'
 import type { FileTransfer } from '../hooks/useFileTransfer'
 import { formatBytes } from '../utils/formatBytes'
+import { formatEta, formatSpeed, progressPercent } from '../utils/transferStats'
 import FileTypeIcon from './FileTypeIcon'
 
 type Props = {
@@ -9,7 +10,7 @@ type Props = {
   getChannel: () => RTCDataChannel | null
 }
 
-function ProgressBar({ value }: { value: number }) {
+function ProgressBar({ value, tall }: { value: number; tall?: boolean }) {
   const clamped = Math.min(100, Math.max(0, Math.round(value)))
   return (
     <div
@@ -17,32 +18,68 @@ function ProgressBar({ value }: { value: number }) {
       aria-valuemin={0}
       aria-valuemax={100}
       aria-valuenow={clamped}
-      className="h-1.5 w-full overflow-hidden rounded-full bg-background ring-1 ring-border"
+      className={`w-full overflow-hidden rounded-full bg-background ring-1 ring-border ${tall ? 'h-2.5' : 'h-1.5'}`}
     >
       <div className="h-full rounded-full bg-primary" style={{ width: `${clamped}%` }} />
     </div>
   )
 }
 
-/** Sender transfer UI — rendered only after the DataChannel is open. */
+/** Sender transfer UI with real byte-driven progress — shown once the channel is open. */
 export default function TransferSender({ files, transfer, getChannel }: Props) {
   const totalBytes = files.reduce((sum, item) => sum + item.file.size, 0)
   const summary = `${files.length} ${files.length === 1 ? 'file' : 'files'} • ${formatBytes(totalBytes)}`
   const isSending = transfer.sendState === 'sending'
+  const active = files.find((item) => !transfer.sendProgress[item.id]?.done) ?? files[0]
 
   const handleSend = () => {
     void transfer.sendFiles(getChannel(), files)
+  }
+
+  const renderLivePanel = () => {
+    if (!active || !isSending) return null
+    const progress = transfer.sendProgress[active.id]
+    const sent = progress?.sentBytes ?? 0
+    const bps = progress?.bps ?? 0
+    const percent = progressPercent(sent, active.file.size)
+    return (
+      <div
+        className="mt-3 rounded-lg border border-border bg-background p-4"
+        aria-live="polite"
+        aria-label={`Sending ${active.file.name}, ${Math.round(percent)} percent`}
+      >
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted">Sending</p>
+        <p className="mt-1 truncate text-sm font-semibold text-dark" title={active.file.name}>
+          {active.file.name}
+        </p>
+        <div className="mt-2">
+          <ProgressBar value={percent} tall />
+        </div>
+        <div className="mt-2 flex items-baseline justify-between gap-2">
+          <p className="text-2xl font-bold text-dark">{Math.round(percent)}%</p>
+          <p className="text-xs text-muted">
+            {formatBytes(sent)} / {formatBytes(active.file.size)}
+          </p>
+        </div>
+        <p className="mt-1 text-xs text-muted">
+          Speed: {bps > 0 ? formatSpeed(bps) : 'measuring…'} • Time remaining:{' '}
+          {formatEta(active.file.size, sent, bps)}
+        </p>
+      </div>
+    )
   }
 
   return (
     <div className="mt-2 text-left">
       <p className="text-center text-xs text-muted">{summary} — ready to send.</p>
 
+      {renderLivePanel()}
+
       <ul className="mt-3 flex flex-col gap-2" aria-label="Files to send">
         {files.map((item) => {
           const progress = transfer.sendProgress[item.id]
           const sent = progress?.sentBytes ?? 0
-          const percent = item.file.size === 0 ? 100 : (sent / item.file.size) * 100
+          const percent = progressPercent(sent, item.file.size)
           return (
             <li
               key={item.id}
@@ -58,7 +95,7 @@ export default function TransferSender({ files, transfer, getChannel }: Props) {
                   </p>
                   <p className="text-xs text-muted">
                     {isSending || transfer.sendState !== 'idle'
-                      ? `${formatBytes(sent)} of ${formatBytes(item.file.size)}`
+                      ? `${formatBytes(sent)} of ${formatBytes(item.file.size)} • ${Math.round(percent)}%`
                       : formatBytes(item.file.size)}
                   </p>
                 </div>

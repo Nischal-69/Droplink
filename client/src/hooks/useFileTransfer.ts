@@ -4,12 +4,15 @@ import {
   decodeControl,
   transferFiles,
 } from '../utils/transferProtocol'
+import { Speedometer } from '../utils/transferStats'
 
 export type SendState = 'idle' | 'sending' | 'done' | 'error' | 'cancelled'
 
 export type SendProgress = {
   sentBytes: number
   done: boolean
+  /** Measured bytes/sec from actual chunk flow. */
+  bps: number
 }
 
 export type ReceivedFile = {
@@ -21,6 +24,8 @@ export type ReceivedFile = {
   done: boolean
   cancelled: boolean
   blobUrl: string | null
+  /** Measured bytes/sec from actual chunk flow. */
+  bps: number
 }
 
 type OutgoingFile = {
@@ -55,6 +60,8 @@ export function useFileTransfer() {
   const incomingRef = useRef(new Map<string, IncomingAssembly>())
   const openFileRef = useRef<string | null>(null)
   const progressTickRef = useRef(0)
+  const sendMeterRef = useRef<{ fileId: string; meter: Speedometer } | null>(null)
+  const receiveMeterRef = useRef<{ fileId: string; meter: Speedometer } | null>(null)
 
   const revokeAll = useCallback(() => {
     setReceived((prev) => {
@@ -97,7 +104,7 @@ export function useFileTransfer() {
     setReceived((prev) =>
       prev.map((item) =>
         item.fileId === fileId
-          ? { ...item, receivedBytes: assembly.received, done: true, blobUrl }
+          ? { ...item, receivedBytes: assembly.received, done: true, blobUrl, bps: 0 }
           : item,
       ),
     )
@@ -105,11 +112,19 @@ export function useFileTransfer() {
 
   const pushProgress = useCallback(
     (fileId: string, receivedBytes: number, done: boolean) => {
+      let slot = receiveMeterRef.current
+      if (!slot || slot.fileId !== fileId) {
+        slot = { fileId, meter: new Speedometer() }
+        receiveMeterRef.current = slot
+      }
+      const bps = done ? 0 : slot.meter.push(receivedBytes)
       const now = Date.now()
       if (!done && now - progressTickRef.current < PROGRESS_THROTTLE_MS) return
       progressTickRef.current = now
       setReceived((prev) =>
-        prev.map((item) => (item.fileId === fileId ? { ...item, receivedBytes, done } : item)),
+        prev.map((item) =>
+          item.fileId === fileId ? { ...item, receivedBytes, done, bps } : item,
+        ),
       )
     },
     [],
@@ -165,6 +180,7 @@ export function useFileTransfer() {
                   done: message.size === 0,
                   cancelled: false,
                   blobUrl: null,
+                  bps: 0,
                 },
               ]
             })
@@ -229,14 +245,20 @@ export function useFileTransfer() {
     setSendError(null)
     setSendState('sending')
     setSendProgress(
-      Object.fromEntries(files.map(({ id }) => [id, { sentBytes: 0, done: false }])),
+      Object.fromEntries(files.map(({ id }) => [id, { sentBytes: 0, done: false, bps: 0 }])),
     )
 
     const markProgress = (fileId: string, sentBytes: number, done: boolean) => {
+      let slot = sendMeterRef.current
+      if (!slot || slot.fileId !== fileId) {
+        slot = { fileId, meter: new Speedometer() }
+        sendMeterRef.current = slot
+      }
+      const bps = done ? 0 : slot.meter.push(sentBytes)
       const now = Date.now()
       if (!done && now - progressTickRef.current < PROGRESS_THROTTLE_MS) return
       progressTickRef.current = now
-      setSendProgress((prev) => ({ ...prev, [fileId]: { sentBytes, done } }))
+      setSendProgress((prev) => ({ ...prev, [fileId]: { sentBytes, done, bps } }))
     }
 
     try {
