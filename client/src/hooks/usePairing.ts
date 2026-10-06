@@ -71,6 +71,9 @@ export function usePairing() {
       })
     }
 
+    // Same-origin connection: no URL is hardcoded, so a page served over
+    // HTTPS automatically uses a secure WebSocket (WSS) for signaling.
+    // File bytes never travel here regardless of transport.
     const socket = io({ autoConnect: false })
 
     socket.on('peer-joined', (payload: PeerJoinedPayload) => {

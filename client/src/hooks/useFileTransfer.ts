@@ -5,6 +5,8 @@ import {
   clampResumeOffset,
   decodeControl,
   encodeControl,
+  sanitizeFileName,
+  sanitizeMimeType,
   transferFiles,
   truncateParts,
 } from '../utils/transferProtocol'
@@ -248,6 +250,9 @@ export function useFileTransfer() {
         switch (message.kind) {
           case 'file-start': {
             const existing = incomingRef.current.get(message.fileId)
+            // Peer metadata is never trusted blindly: sanitize before storing.
+            const safeName = sanitizeFileName(message.name)
+            const safeMime = sanitizeMimeType(message.mime)
             if (existing && existing.transferId === message.transferId && !existing.cancelled) {
               if (existing.finalized) {
                 // Duplicate announce for an already-complete file — keep the download.
@@ -259,18 +264,18 @@ export function useFileTransfer() {
               const trimmed = truncateParts(existing.parts, existing.received, resumeOffset)
               existing.parts = trimmed.parts
               existing.received = trimmed.receivedBytes
-              existing.name = message.name
+              existing.name = safeName
               existing.size = message.size
-              existing.mime = message.mime
+              existing.mime = safeMime
               openFileRef.current = message.fileId
               setReceived((prev) =>
                 prev.map((item) =>
                   item.fileId === message.fileId
                     ? {
                         ...item,
-                        name: message.name,
+                        name: safeName,
                         size: message.size,
-                        mime: message.mime,
+                        mime: safeMime,
                         receivedBytes: trimmed.receivedBytes,
                         done: false,
                         cancelled: false,
@@ -287,9 +292,9 @@ export function useFileTransfer() {
             incomingRef.current.set(message.fileId, {
               fileId: message.fileId,
               transferId: message.transferId,
-              name: message.name,
+              name: safeName,
               size: message.size,
-              mime: message.mime,
+              mime: safeMime,
               parts: [],
               received: 0,
               cancelled: false,
@@ -299,9 +304,9 @@ export function useFileTransfer() {
             setReceived((prev) => {
               const entry = {
                 fileId: message.fileId,
-                name: message.name,
+                name: safeName,
                 size: message.size,
-                mime: message.mime,
+                mime: safeMime,
                 receivedBytes: 0,
                 done: message.size === 0,
                 cancelled: false,
@@ -329,9 +334,9 @@ export function useFileTransfer() {
                 .filter((entry) => !known.has(entry.fileId))
                 .map((entry) => ({
                   fileId: entry.fileId,
-                  name: entry.name,
+                  name: sanitizeFileName(entry.name),
                   size: entry.size,
-                  mime: entry.mime,
+                  mime: sanitizeMimeType(entry.mime),
                   receivedBytes: 0,
                   done: false,
                   cancelled: false,

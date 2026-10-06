@@ -15,6 +15,21 @@ export const HIGH_WATER_MARK = 1024 * 1024
 export const LOW_WATER_MARK = 256 * 1024
 /** Minimum gap between progress state updates. */
 export const PROGRESS_THROTTLE_MS = 120
+/**
+ * Inbound metadata bounds. Peer-provided values are never trusted blindly:
+ * oversized or misshapen frames are rejected before they reach the app.
+ */
+export const MAX_TRANSFER_ID_LENGTH = 128
+export const MAX_FILE_ID_LENGTH = 128
+/** Raw wire cap; receipt sanitizing trims stored names to MAX_FILE_NAME_LENGTH. */
+export const MAX_RAW_NAME_LENGTH = 1024
+export const MAX_FILE_NAME_LENGTH = 255
+export const MAX_MIME_LENGTH = 128
+export const MAX_QUEUE_FILES = 256
+/** Largest single file the protocol will describe (1 TiB). */
+export const MAX_FILE_SIZE = 2 ** 40
+/** Displayed names are shortened for layout and safety. */
+export const MAX_DISPLAY_NAME_LENGTH = 80
 
 export type QueueEntry = {
   fileId: string
@@ -40,12 +55,93 @@ function isValidQueueEntry(entry: unknown): entry is QueueEntry {
   const record = entry as Record<string, unknown>
   return (
     typeof record['fileId'] === 'string' &&
+    (record['fileId'] as string).length > 0 &&
+    (record['fileId'] as string).length <= MAX_FILE_ID_LENGTH &&
     typeof record['name'] === 'string' &&
+    (record['name'] as string).length > 0 &&
+    (record['name'] as string).length <= MAX_RAW_NAME_LENGTH &&
     typeof record['size'] === 'number' &&
     Number.isFinite(record['size']) &&
     (record['size'] as number) >= 0 &&
-    typeof record['mime'] === 'string'
+    (record['size'] as number) <= MAX_FILE_SIZE &&
+    typeof record['mime'] === 'string' &&
+    (record['mime'] as string).length <= 512
   )
+}
+
+/** Unicode bidi override/isolate controls commonly abused to spoof names. */
+function isBidiControl(code: number): boolean {
+  return (
+    (code >= 0x202a && code <= 0x202e) ||
+    (code >= 0x2066 && code <= 0x2069) ||
+    code === 0x200e ||
+    code === 0x200f ||
+    code === 0x061c
+  )
+}
+
+/**
+ * Sanitize a peer-provided filename for storage/download use: drop control
+ * characters, bidi overrides, and path separators; trim; cap length.
+ * Never returns an empty string.
+ */
+export function sanitizeFileName(name: unknown): string {
+  if (typeof name !== 'string') return 'file'
+  let out = ''
+  for (const ch of name) {
+    const code = ch.codePointAt(0) ?? 0
+    if (code < 32 || code === 127) continue
+    if (code === 47 || code === 92) continue
+    if (isBidiControl(code)) continue
+    out += ch
+  }
+  const trimmed = out.trim()
+  if (!trimmed || trimmed === '.' || trimmed === '..') return 'file'
+  const chars = Array.from(trimmed)
+  const capped = chars.length > MAX_FILE_NAME_LENGTH ? chars.slice(0, MAX_FILE_NAME_LENGTH).join('') : trimmed
+  const recapped = capped.trim()
+  if (!recapped || recapped === '.' || recapped === '..') return 'file'
+  return recapped
+}
+
+/** Sanitize a peer-provided MIME label: printable ASCII only, capped. */
+export function sanitizeMimeType(mime: unknown): string {
+  if (typeof mime !== 'string') return 'application/octet-stream'
+  let out = ''
+  for (const ch of mime) {
+    const code = ch.codePointAt(0) ?? 0
+    if (code < 32 || code > 126) continue
+    out += ch
+  }
+  const trimmed = out.trim().slice(0, MAX_MIME_LENGTH)
+  return trimmed || 'application/octet-stream'
+}
+
+/**
+ * Sanitize a filename for display (text, titles, aria labels): strip
+ * controls and bidi overrides, fold line breaks to spaces, collapse runs
+ * of spaces, and shorten with an ellipsis. Never returns an empty string.
+ */
+export function sanitizeDisplayName(name: unknown): string {
+  if (typeof name !== 'string') return 'file'
+  let out = ''
+  for (const ch of name) {
+    const code = ch.codePointAt(0) ?? 0
+    if (code === 9 || code === 10 || code === 13 || code === 32) {
+      out += ' '
+      continue
+    }
+    if (code < 32 || code === 127) continue
+    if (isBidiControl(code)) continue
+    out += ch
+  }
+  const collapsed = out.split(' ').filter((word) => word.length > 0).join(' ')
+  if (!collapsed) return 'file'
+  const chars = Array.from(collapsed)
+  if (chars.length > MAX_DISPLAY_NAME_LENGTH) {
+    return chars.slice(0, MAX_DISPLAY_NAME_LENGTH - 3).join('') + '...'
+  }
+  return collapsed
 }
 
   function isValidOffset(value: unknown): boolean {
@@ -70,35 +166,61 @@ export function decodeControl(raw: string): ControlMessage | null {
     return null
   }
   if (typeof message['kind'] !== 'string' || typeof message['transferId'] !== 'string') return null
+  if (message['transferId'].length === 0 || message['transferId'].length > MAX_TRANSFER_ID_LENGTH) {
+    return null
+  }
   switch (message['kind']) {
     case 'transfer-start':
       if (typeof message['fileCount'] !== 'number' || typeof message['totalBytes'] !== 'number') return null
+      if (!Number.isInteger(message['fileCount'] as number)) return null
+      if ((message['fileCount'] as number) < 0 || (message['fileCount'] as number) > MAX_QUEUE_FILES) {
+        return null
+      }
+      if (!Number.isFinite(message['totalBytes'] as number) || (message['totalBytes'] as number) < 0) {
+        return null
+      }
       break
     case 'queue':
       if (!Array.isArray(message['files']) || !(message['files'] as unknown[]).every(isValidQueueEntry)) {
         return null
       }
+      if ((message['files'] as unknown[]).length > MAX_QUEUE_FILES) return null
       break
     case 'file-start':
       if (
         typeof message['fileId'] !== 'string' ||
+        (message['fileId'] as string).length === 0 ||
+        (message['fileId'] as string).length > MAX_FILE_ID_LENGTH ||
         typeof message['name'] !== 'string' ||
+        (message['name'] as string).length === 0 ||
+        (message['name'] as string).length > MAX_RAW_NAME_LENGTH ||
         typeof message['size'] !== 'number' ||
-        typeof message['mime'] !== 'string'
+        typeof message['mime'] !== 'string' ||
+        (message['mime'] as string).length > 512
       ) {
         return null
       }
       if (!Number.isFinite(message['size']) || (message['size'] as number) < 0) return null
+      if ((message['size'] as number) > MAX_FILE_SIZE) return null
       if (!isValidOffset(message['offset'])) return null
       break
     case 'file-end':
       if (typeof message['fileId'] !== 'string') return null
+      if ((message['fileId'] as string).length === 0 || (message['fileId'] as string).length > MAX_FILE_ID_LENGTH) {
+        return null
+      }
       break
     case 'resume-query':
       if (typeof message['fileId'] !== 'string') return null
+      if ((message['fileId'] as string).length === 0 || (message['fileId'] as string).length > MAX_FILE_ID_LENGTH) {
+        return null
+      }
       break
     case 'resume-state':
       if (typeof message['fileId'] !== 'string') return null
+      if ((message['fileId'] as string).length === 0 || (message['fileId'] as string).length > MAX_FILE_ID_LENGTH) {
+        return null
+      }
       if (
         typeof message['receivedBytes'] !== 'number' ||
         !Number.isFinite(message['receivedBytes']) ||
@@ -124,11 +246,30 @@ export function chunkCount(size: number): number {
   return Math.ceil(size / CHUNK_SIZE)
 }
 
+/**
+ * Unpredictable temporary transfer id. Uses a CSPRNG in all cases —
+ * randomUUID when available, otherwise getRandomValues (which, unlike
+ * randomUUID, is also exposed in non-secure contexts such as plain-HTTP
+ * LAN addresses). Never falls back to Math.random.
+ */
 export function makeTransferId(prefix: string): string {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
-    return `${prefix}-${crypto.randomUUID()}`
+  const g = globalThis.crypto
+  if (g && typeof g.randomUUID === 'function') {
+    try {
+      return `${prefix}-${g.randomUUID()}`
+    } catch {
+      // Fall through to the manual CSPRNG form below.
+    }
   }
-  return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1e9)}`
+  if (!g || typeof g.getRandomValues !== 'function') {
+    throw new Error('Secure random generator unavailable.')
+  }
+  const bytes = new Uint8Array(16)
+  g.getRandomValues(bytes)
+  bytes[6] = (bytes[6] & 0x0f) | 0x40
+  bytes[8] = (bytes[8] & 0x3f) | 0x80
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
+  return `${prefix}-${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
 
 /** Minimal DataChannel surface the sender needs (real or mocked). */

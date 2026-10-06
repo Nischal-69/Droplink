@@ -371,6 +371,9 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
         <Lock size={13} className="mt-0.5 shrink-0" aria-hidden />
         No cloud storage. No file uploads. Direct device-to-device transfer.
       </p>
+      <p className="mt-1 text-center text-xs leading-relaxed text-muted">
+        Your files are transferred directly between devices.
+      </p>
     </section>
   )
 }

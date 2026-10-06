@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Archive, Check, Download, Pause, X } from 'lucide-react'
 import type { FileTransfer, ReceivedFile } from '../hooks/useFileTransfer'
 import { formatBytes } from '../utils/formatBytes'
+import { sanitizeDisplayName } from '../utils/transferProtocol'
 import { progressPercent } from '../utils/transferStats'
 import { createZipBlob, defaultZipName, triggerBlobDownload } from '../utils/zipFiles'
 import FileTypeIcon from './FileTypeIcon'
@@ -67,6 +68,8 @@ export default function TransferReceiver({
   const hasActive = active !== undefined
   const isPaused = transfer.receivePaused && hasActive
   const activePercent = active ? progressPercent(active.receivedBytes, active.size) : 0
+  // Peer-provided names are sanitized for display (text, titles, labels).
+  const activeDisplayName = active ? sanitizeDisplayName(active.name) : ''
   const completed = transfer.received.filter(
     (item) => item.done && !item.cancelled && (item.blobUrl || item.blob),
   )
@@ -126,7 +129,7 @@ export default function TransferReceiver({
         <div
           className="rounded-lg border border-border bg-background p-4"
           aria-live="polite"
-          aria-label={`${isPaused ? 'Paused' : 'Receiving'} ${active.name}, ${Math.round(activePercent)} percent`}
+          aria-label={`${isPaused ? 'Paused' : 'Receiving'} ${activeDisplayName}, ${Math.round(activePercent)} percent`}
         >
           <div className="flex items-center justify-between gap-2">
             <p className="text-xs font-semibold uppercase tracking-wide text-muted">
@@ -138,8 +141,8 @@ export default function TransferReceiver({
               </span>
             )}
           </div>
-          <p className="mt-1 truncate text-sm font-semibold text-dark" title={active.name}>
-            {active.name}
+          <p className="mt-1 truncate text-sm font-semibold text-dark" title={activeDisplayName}>
+            {activeDisplayName}
           </p>
           <div className="mt-2">
             <ProgressBar value={activePercent} tall />
@@ -207,15 +210,16 @@ export default function TransferReceiver({
                 : `${Math.round(percent)}%`
           const isWaiting = !item.done && !item.cancelled && item.waiting
           const isReady = item.done && !item.cancelled && (item.blobUrl || item.blob)
+          const displayName = sanitizeDisplayName(item.name)
           return (
             <li key={item.fileId} className="rounded-lg border border-border bg-background px-3 py-2.5">
               <div className="flex items-center gap-3">
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white ring-1 ring-border">
-                  <FileTypeIcon fileName={item.name} mimeType={item.mime} />
+                  <FileTypeIcon fileName={displayName} mimeType={item.mime} />
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline justify-between gap-2">
-                    <p className="truncate text-sm font-medium" title={item.name}>
+                    <p className="truncate text-sm font-medium" title={displayName}>
                       {isReady && (
                         <Check
                           size={14}
@@ -223,7 +227,7 @@ export default function TransferReceiver({
                           aria-label="Complete"
                         />
                       )}
-                      {item.name}
+                      {displayName}
                     </p>
                     <span
                       className={`shrink-0 text-xs font-semibold ${isWaiting || item.cancelled ? 'text-muted' : 'text-dark'}`}
@@ -256,7 +260,7 @@ export default function TransferReceiver({
                     href={item.blobUrl}
                     download={item.name}
                     className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
-                    aria-label={`Download ${item.name}`}
+                    aria-label={`Download ${displayName}`}
                   >
                     <Download size={15} aria-hidden /> Download
                   </a>
@@ -265,7 +269,7 @@ export default function TransferReceiver({
                     type="button"
                     onClick={() => handleSingleDownload(item)}
                     className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
-                    aria-label={`Download ${item.name}`}
+                    aria-label={`Download ${displayName}`}
                   >
                     <Download size={15} aria-hidden /> Download
                   </button>
