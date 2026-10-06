@@ -26,6 +26,8 @@ export type ReceivedFile = {
   /** Listed from the queue manifest but transfer has not started yet. */
   waiting: boolean
   blobUrl: string | null
+  /** Reconstructed file bytes kept locally for single + ZIP downloads. */
+  blob: Blob | null
   /** Measured bytes/sec from actual chunk flow. */
   bps: number
 }
@@ -106,7 +108,7 @@ export function useFileTransfer() {
     setReceived((prev) =>
       prev.map((item) =>
         item.fileId === fileId
-          ? { ...item, receivedBytes: assembly.received, done: true, blobUrl, bps: 0, waiting: false }
+          ? { ...item, receivedBytes: assembly.received, done: true, blobUrl, blob, bps: 0, waiting: false }
           : item,
       ),
     )
@@ -180,6 +182,7 @@ export function useFileTransfer() {
                 cancelled: false,
                 waiting: false,
                 blobUrl: null,
+                blob: null,
                 bps: 0,
               }
               if (prev.some((item) => item.fileId === message.fileId)) {
@@ -206,6 +209,7 @@ export function useFileTransfer() {
                   cancelled: false,
                   waiting: true,
                   blobUrl: null,
+                  blob: null,
                   bps: 0,
                 }))
               return additions.length > 0 ? [...prev, ...additions] : prev

@@ -1,7 +1,9 @@
-import { Check, Download } from 'lucide-react'
-import type { FileTransfer } from '../hooks/useFileTransfer'
+import { useState } from 'react'
+import { Archive, Check, Download } from 'lucide-react'
+import type { FileTransfer, ReceivedFile } from '../hooks/useFileTransfer'
 import { formatBytes } from '../utils/formatBytes'
 import { progressPercent } from '../utils/transferStats'
+import { createZipBlob, defaultZipName, triggerBlobDownload } from '../utils/zipFiles'
 import FileTypeIcon from './FileTypeIcon'
 
 function ProgressBar({ value, tall }: { value: number; tall?: boolean }) {
@@ -19,8 +21,34 @@ function ProgressBar({ value, tall }: { value: number; tall?: boolean }) {
   )
 }
 
+/** Resolve the reconstructed bytes kept locally (never fetched from a server). */
+async function resolveBlob(item: ReceivedFile): Promise<Blob | null> {
+  if (item.blob) return item.blob
+  if (item.blobUrl) {
+    try {
+      const response = await fetch(item.blobUrl)
+      return await response.blob()
+    } catch {
+      return null
+    }
+  }
+  return null
+}
+
+function downloadViaAnchor(url: string, filename: string) {
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = filename
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+}
+
 /** Receiver transfer UI with real byte-driven progress — shown once the channel is open. */
 export default function TransferReceiver({ transfer }: { transfer: FileTransfer }) {
+  const [isZipping, setIsZipping] = useState(false)
+  const [zipError, setZipError] = useState<string | null>(null)
+
   if (transfer.received.length === 0) {
     return (
       <p className="mx-auto mt-2 max-w-xs text-xs leading-relaxed text-muted">
@@ -31,6 +59,58 @@ export default function TransferReceiver({ transfer }: { transfer: FileTransfer 
 
   const active = transfer.received.find((item) => !item.done && !item.cancelled)
   const activePercent = active ? progressPercent(active.receivedBytes, active.size) : 0
+  const completed = transfer.received.filter(
+    (item) => item.done && !item.cancelled && (item.blobUrl || item.blob),
+  )
+
+  const handleSingleDownload = (item: ReceivedFile) => {
+    if (item.blob) {
+      // Browser saves the reconstructed Blob under its original filename.
+      triggerBlobDownload(item.blob, item.name)
+    } else if (item.blobUrl) {
+      downloadViaAnchor(item.blobUrl, item.name)
+    }
+  }
+
+  /** Package all finished files into a ZIP locally in the browser. */
+  const handleDownloadAll = async () => {
+    if (completed.length === 0 || isZipping) return
+    // Single file: no ZIP needed — save it directly under its original name.
+    if (completed.length === 1) {
+      handleSingleDownload(completed[0])
+      return
+    }
+    setIsZipping(true)
+    setZipError(null)
+    try {
+      const entries = []
+      for (const item of completed) {
+        const blob = await resolveBlob(item)
+        if (!blob) throw new Error(`Could not read "${item.name}" for zipping.`)
+        entries.push({ name: item.name, blob })
+      }
+      const zipBlob = await createZipBlob(entries)
+      triggerBlobDownload(zipBlob, defaultZipName())
+    } catch (error) {
+      // Fall back to saving files one by one so the user still gets everything.
+      try {
+        for (const item of completed) {
+          const blob = await resolveBlob(item)
+          if (blob) {
+            triggerBlobDownload(blob, item.name)
+          } else if (item.blobUrl) {
+            downloadViaAnchor(item.blobUrl, item.name)
+          }
+          await new Promise((resolve) => setTimeout(resolve, 400))
+        }
+        setZipError('Could not build a ZIP — downloaded the files individually instead.')
+      } catch {
+        setZipError(error instanceof Error ? error.message : 'Could not create a ZIP archive.')
+      }
+    } finally {
+      setIsZipping(false)
+    }
+  }
 
   return (
     <div className="mt-2 text-left">
@@ -56,6 +136,33 @@ export default function TransferReceiver({ transfer }: { transfer: FileTransfer 
         </div>
       )}
 
+      {completed.length > 1 && (
+        <div className="mt-2 rounded-lg border border-border bg-background px-3 py-2.5">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-sm font-medium text-dark">
+              {completed.length} files ready • {formatBytes(completed.reduce((sum, item) => sum + item.size, 0))}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void handleDownloadAll()}
+            disabled={isZipping}
+            className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-dark px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-wait disabled:opacity-60"
+          >
+            <Archive size={15} aria-hidden />
+            {isZipping ? 'Preparing ZIP…' : 'Download All (ZIP)'}
+          </button>
+          {zipError && (
+            <p className="mt-1.5 text-xs text-danger" role="alert">
+              {zipError}
+            </p>
+          )}
+          <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
+            Packaged locally in your browser — files are never uploaded to a server.
+          </p>
+        </div>
+      )}
+
       <ul className="mt-2 flex flex-col gap-2" aria-label="Transfer queue">
         {transfer.received.map((item) => {
           const percent = progressPercent(item.receivedBytes, item.size)
@@ -67,6 +174,7 @@ export default function TransferReceiver({ transfer }: { transfer: FileTransfer 
                 ? 'waiting'
                 : `${Math.round(percent)}%`
           const isWaiting = !item.done && !item.cancelled && item.waiting
+          const isReady = item.done && !item.cancelled && (item.blobUrl || item.blob)
           return (
             <li key={item.fileId} className="rounded-lg border border-border bg-background px-3 py-2.5">
               <div className="flex items-center gap-3">
@@ -76,6 +184,13 @@ export default function TransferReceiver({ transfer }: { transfer: FileTransfer 
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline justify-between gap-2">
                     <p className="truncate text-sm font-medium" title={item.name}>
+                      {isReady && (
+                        <Check
+                          size={14}
+                          className="mr-1 inline-block shrink-0 text-success"
+                          aria-label="Complete"
+                        />
+                      )}
                       {item.name}
                     </p>
                     <span
@@ -94,7 +209,7 @@ export default function TransferReceiver({ transfer }: { transfer: FileTransfer 
                           : `${formatBytes(item.receivedBytes)} of ${formatBytes(item.size)}`}
                   </p>
                 </div>
-                {item.done && !item.cancelled && (
+                {isReady && !item.blobUrl && (
                   <Check size={16} className="shrink-0 text-success" aria-label="Received" />
                 )}
               </div>
@@ -103,15 +218,26 @@ export default function TransferReceiver({ transfer }: { transfer: FileTransfer 
                   <ProgressBar value={percent} />
                 </div>
               )}
-              {item.done && !item.cancelled && item.blobUrl && (
-                <a
-                  href={item.blobUrl}
-                  download={item.name}
-                  className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
-                >
-                  <Download size={15} aria-hidden /> Download {item.name}
-                </a>
-              )}
+              {isReady &&
+                (item.blobUrl ? (
+                  <a
+                    href={item.blobUrl}
+                    download={item.name}
+                    className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
+                    aria-label={`Download ${item.name}`}
+                  >
+                    <Download size={15} aria-hidden /> Download
+                  </a>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => handleSingleDownload(item)}
+                    className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
+                    aria-label={`Download ${item.name}`}
+                  >
+                    <Download size={15} aria-hidden /> Download
+                  </button>
+                ))}
             </li>
           )
         })}
