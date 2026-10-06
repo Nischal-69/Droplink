@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
 import { Lock } from 'lucide-react'
 import DirectConnectionPanel from './DirectConnectionPanel'
+import NetworkStatusPanel from './NetworkStatusPanel'
 import PairingStatusBadge from './PairingStatusBadge'
 import TransferReceiver from './TransferReceiver'
 import { useFileTransfer } from '../hooks/useFileTransfer'
@@ -131,8 +132,14 @@ export default function ReceiveFilesCard({ onSwitchToSend, initialCode = '' }: P
 
         {isConnected && pairing.code ? (
           <div className="text-center">
-            <p className="text-sm font-semibold text-dark">
-              Connected to sender <span className="font-mono">{pairing.code}</span>
+            <NetworkStatusPanel
+              status={pairing.status}
+              localRole="receiver"
+              localDevice={pairing.localDevice}
+              peerDevice={pairing.peerDevice}
+            />
+            <p className="mt-2 text-xs leading-relaxed text-muted">
+              Paired via code <span className="font-mono">{pairing.code}</span>
             </p>
             <div className="mt-3">
               <DirectConnectionPanel

@@ -4,6 +4,7 @@ import { ArrowRight, Check, Copy, Lock, Upload, X } from 'lucide-react'
 import QRCode from 'react-qr-code'
 import DirectConnectionPanel from './DirectConnectionPanel'
 import FileTypeIcon from './FileTypeIcon'
+import NetworkStatusPanel from './NetworkStatusPanel'
 import PairingStatusBadge from './PairingStatusBadge'
 import TransferSender from './TransferSender'
 import { useFileTransfer } from '../hooks/useFileTransfer'
@@ -199,8 +200,13 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
         <div className="mt-5 rounded-lg border border-border bg-background p-6 text-center">
           {pairing.status === 'connected' ? (
             <>
-              <p className="text-sm font-semibold text-dark">Receiver connected</p>
-              <p className="mt-1 text-xs leading-relaxed text-muted">
+              <NetworkStatusPanel
+                status={pairing.status}
+                localRole="sender"
+                localDevice={pairing.localDevice}
+                peerDevice={pairing.peerDevice}
+              />
+              <p className="mt-3 text-xs leading-relaxed text-muted">
                 {summary} — paired via code {pairing.code ?? ''}.
               </p>
               <div className="mt-4 border-t border-border pt-4">
@@ -233,19 +239,17 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
             </>
           ) : (
             <>
-              <p className="text-xs font-medium uppercase tracking-wide text-muted">
-                {pairing.status === 'connecting' ? 'Connecting' : 'Scan to connect'}
-              </p>
-              {pairing.status === 'connecting' || !pairing.code ? (
-                <p className="mt-3 flex items-center justify-center gap-2 text-sm text-muted">
-                  <span
-                    aria-hidden
-                    className="inline-block h-2 w-2 animate-pulse rounded-full bg-primary"
-                  />
-                  Connecting to signaling server...
-                </p>
-              ) : (
+              <NetworkStatusPanel
+                status={pairing.status}
+                localRole="sender"
+                localDevice={pairing.localDevice}
+                peerDevice={pairing.peerDevice}
+              />
+              {pairing.status !== 'connecting' && pairing.code && (
                 <>
+                  <p className="mt-4 text-xs font-medium uppercase tracking-wide text-muted">
+                    Scan to connect
+                  </p>
                   {pairingUrl && (
                     <div className="mx-auto mt-4 w-fit rounded-xl border border-border bg-white p-3">
                       <QRCode
@@ -285,13 +289,6 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
                       </>
                     )}
                   </button>
-                  <p className="mt-3 flex items-center justify-center gap-2 text-sm text-muted">
-                    <span
-                      aria-hidden
-                      className="inline-block h-2 w-2 animate-pulse rounded-full bg-primary"
-                    />
-                    Waiting for receiver...
-                  </p>
                 </>
               )}
               {pairing.error && (

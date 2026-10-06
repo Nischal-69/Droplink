@@ -56,6 +56,16 @@ function generateRoomId() {
   return crypto.randomBytes(16).toString('hex');
 }
 
+/**
+ * Friendly device labels only (e.g. "Chrome on Windows") — display-only,
+ * never IP addresses. Sanitized and length-capped before relaying.
+ */
+function sanitizeDeviceLabel(input) {
+  // eslint-disable-next-line no-control-regex
+  const cleaned = String(input ?? '').replace(/[\u0000-\u001F\u007F]/g, '').trim().slice(0, 64);
+  return cleaned || null;
+}
+
 function leaveRoom(socket, notifyPeer = false) {
   const code = socketToCode.get(socket.id);
   if (!code) return;
@@ -75,6 +85,7 @@ function leaveRoom(socket, notifyPeer = false) {
     }
   } else if (room.guestId === socket.id) {
     room.guestId = null;
+    room.guestDevice = null;
     if (notifyPeer) {
       socket
         .to(room.roomId)
@@ -101,7 +112,12 @@ io.on('connection', (socket) => {
   console.log(`client connected: ${socket.id}`);
 
   // Sender creates a temporary room and receives a 6-digit code.
-  socket.on('create-room', (callback) => {
+  // Optional payload: { device } — a friendly display label, never an IP.
+  socket.on('create-room', (payload, callback) => {
+    if (typeof payload === 'function') {
+      callback = payload;
+      payload = null;
+    }
     if (typeof callback !== 'function') return;
     leaveRoom(socket);
     const code = generateCode();
@@ -110,7 +126,9 @@ io.on('connection', (socket) => {
       roomId,
       code,
       hostId: socket.id,
+      hostDevice: sanitizeDeviceLabel(payload?.device),
       guestId: null,
+      guestDevice: null,
       createdAt: Date.now(),
     });
     socketToCode.set(socket.id, code);
@@ -144,11 +162,14 @@ io.on('connection', (socket) => {
     }
     leaveRoom(socket);
     room.guestId = socket.id;
+    room.guestDevice = sanitizeDeviceLabel(payload?.device);
     socketToCode.set(socket.id, code);
     socket.join(room.roomId);
     console.log(`peer joined room: ${room.roomId}`);
-    respond?.({ ok: true, roomId: room.roomId, code: formatCode(code) });
-    socket.to(room.roomId).emit('peer-joined', { roomId: room.roomId, peerId: socket.id });
+    respond?.({ ok: true, roomId: room.roomId, code: formatCode(code), hostDevice: room.hostDevice });
+    socket
+      .to(room.roomId)
+      .emit('peer-joined', { roomId: room.roomId, peerId: socket.id, device: room.guestDevice });
   });
 
   socket.on('leave-room', () => {

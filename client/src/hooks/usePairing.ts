@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { io, type Socket } from 'socket.io-client'
+import { getLocalDeviceLabel, sanitizeDeviceLabel } from '../utils/deviceInfo'
 
 export type PairingStatus = 'idle' | 'connecting' | 'waiting' | 'connected' | 'disconnected'
 export type PairingRole = 'sender' | 'receiver' | null
@@ -8,7 +9,16 @@ type AckResponse = {
   ok: boolean
   roomId?: string
   code?: string
+  /** Friendly peer label (e.g. "Chrome on Android") — display only, never an IP. */
+  hostDevice?: string | null
   error?: string
+}
+
+type PeerJoinedPayload = {
+  roomId?: string
+  peerId?: string
+  /** Friendly peer label (e.g. "Chrome on Windows") — display only, never an IP. */
+  device?: string | null
 }
 
 function normalizeCode(input: string): string {
@@ -28,6 +38,10 @@ export function usePairing() {
   const [roomId, setRoomId] = useState<string | null>(null)
   const [code, setCode] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  /** This device's friendly label, e.g. "Chrome on Windows". */
+  const [localDevice] = useState(() => getLocalDeviceLabel())
+  /** The paired peer's friendly label, e.g. "Chrome on Android" (null until joined). */
+  const [peerDevice, setPeerDevice] = useState<string | null>(null)
 
   const ensureSocket = useCallback((): Promise<Socket> => {
     const existing = socketRef.current
@@ -59,9 +73,10 @@ export function usePairing() {
 
     const socket = io({ autoConnect: false })
 
-    socket.on('peer-joined', () => {
+    socket.on('peer-joined', (payload: PeerJoinedPayload) => {
       setStatus('connected')
       setError(null)
+      setPeerDevice(sanitizeDeviceLabel(payload?.device))
     })
 
     socket.on('peer-disconnected', () => {
@@ -110,7 +125,7 @@ export function usePairing() {
       const socket = await ensureSocket()
       const res = await new Promise<AckResponse>((resolve, reject) => {
         const timer = window.setTimeout(() => reject(new Error('Server did not respond.')), 8000)
-        socket.emit('create-room', (response: AckResponse) => {
+        socket.emit('create-room', { device: getLocalDeviceLabel() }, (response: AckResponse) => {
           window.clearTimeout(timer)
           resolve(response)
         })
@@ -142,16 +157,21 @@ export function usePairing() {
         const socket = await ensureSocket()
         const res = await new Promise<AckResponse>((resolve, reject) => {
           const timer = window.setTimeout(() => reject(new Error('Server did not respond.')), 8000)
-          socket.emit('join-room', { code: normalized }, (response: AckResponse) => {
-            window.clearTimeout(timer)
-            resolve(response)
-          })
+          socket.emit(
+            'join-room',
+            { code: normalized, device: getLocalDeviceLabel() },
+            (response: AckResponse) => {
+              window.clearTimeout(timer)
+              resolve(response)
+            },
+          )
         })
         if (!res.ok || !res.roomId) {
           throw new Error(res.error ?? 'Could not join the room.')
         }
         setRoomId(res.roomId)
         setCode(res.code ?? rawCode)
+        setPeerDevice(sanitizeDeviceLabel(res.hostDevice))
         setStatus('connected')
       } catch (err) {
         setStatus('disconnected')
@@ -168,6 +188,7 @@ export function usePairing() {
     setRoomId(null)
     setCode(null)
     setError(null)
+    setPeerDevice(null)
   }, [])
 
   /** Raw signaling socket for WebRTC handshake (signaling only). */
@@ -180,5 +201,5 @@ export function usePairing() {
     }
   }, [])
 
-  return { status, role, roomId, code, error, createRoom, joinRoom, leave, getSocket }
+  return { status, role, roomId, code, error, localDevice, peerDevice, createRoom, joinRoom, leave, getSocket }
 }
