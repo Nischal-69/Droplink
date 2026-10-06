@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, DragEvent } from 'react'
-import { ArrowRight, Check, Copy, Lock, Upload, X } from 'lucide-react'
+import { ArrowRight, Check, Copy, Lock, Share2, Upload, X } from 'lucide-react'
 import QRCode from 'react-qr-code'
 import DirectConnectionPanel from './DirectConnectionPanel'
 import FileTypeIcon from './FileTypeIcon'
@@ -31,6 +31,7 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
   const [dragging, setDragging] = useState(false)
   const [continued, setContinued] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [linkCopied, setLinkCopied] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const pairing = usePairing()
   const transfer = useFileTransfer()
@@ -83,6 +84,7 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
   const handleContinue = () => {
     setContinued(true)
     setCopied(false)
+    setLinkCopied(false)
     void pairing.createRoom()
   }
 
@@ -100,6 +102,32 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
       window.setTimeout(() => setCopied(false), 1500)
     } catch {
       setCopied(false)
+    }
+  }
+
+  const canNativeShare =
+    typeof navigator !== 'undefined' && 'share' in navigator
+
+  const handleShareLink = async () => {
+    if (!pairingUrl) return
+    if (canNativeShare) {
+      try {
+        await navigator.share({
+          title: 'DropLink transfer',
+          text: `Join my DropLink transfer with code ${pairing.code}`,
+          url: pairingUrl,
+        })
+      } catch {
+        // User dismissed the sheet — staying on this screen is correct.
+      }
+      return
+    }
+    try {
+      await navigator.clipboard.writeText(pairingUrl)
+      setLinkCopied(true)
+      window.setTimeout(() => setLinkCopied(false), 1500)
+    } catch {
+      setLinkCopied(false)
     }
   }
 
@@ -147,7 +175,7 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
   return (
     <section
       aria-label="Send files"
-      className="mt-8 w-full rounded-xl border border-border bg-white p-6 sm:p-8"
+      className="mt-8 w-full rounded-xl border border-border bg-white p-4 sm:p-8"
     >
       <div className="flex items-center justify-center gap-2">
         <h2 className="text-center text-lg font-semibold">Send files</h2>
@@ -167,15 +195,17 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
             onDragLeave={() => setDragging(false)}
             onDrop={handleDrop}
             aria-label="Select files by browsing or dropping them here"
-            className={`mt-5 w-full rounded-lg border border-dashed px-4 py-8 text-center transition-colors ${
+            className={`mt-5 w-full rounded-lg border border-dashed px-4 py-10 text-center transition-colors sm:py-8 ${
               dragging ? 'border-primary bg-primary/5' : 'border-border bg-background'
             }`}
           >
             <span className="mx-auto flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10">
               <Upload size={22} className="text-primary" aria-hidden />
             </span>
-            <span className="mt-3 block text-sm font-semibold">Drop files here</span>
-            <span className="mt-1 block text-sm text-muted">or browse your device</span>
+            <span className="mt-3 hidden text-sm font-semibold sm:block">Drop files here</span>
+            <span className="mt-3 block text-base font-semibold sm:hidden">Tap to choose files</span>
+            <span className="mt-1 hidden text-sm text-muted sm:block">or browse your device</span>
+            <span className="mt-1 block text-sm text-muted sm:hidden">Photos, videos, documents</span>
             <span className="mt-3 block text-xs text-muted">
               Your files are transferred directly.
             </span>
@@ -212,9 +242,9 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
                       type="button"
                       onClick={() => removeFile(item.id)}
                       aria-label={`Remove ${item.file.name}`}
-                      className="shrink-0 rounded-lg p-1.5 text-muted hover:bg-white hover:text-danger"
+                      className="inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-lg p-1.5 text-muted hover:bg-white hover:text-danger"
                     >
-                      <X size={16} aria-hidden />
+                      <X size={18} aria-hidden />
                     </button>
                   </li>
                 ))}
@@ -228,7 +258,7 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
                 onClick={handleContinue}
                 disabled={!online}
                 title={online ? undefined : 'You appear to be offline'}
-                className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                className="mt-2 inline-flex min-h-[48px] w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Continue <ArrowRight size={16} aria-hidden />
               </button>
@@ -238,7 +268,7 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
       )}
 
       {continued && (
-        <div className="mt-5 rounded-lg border border-border bg-background p-6 text-center">
+        <div className="mt-5 rounded-lg border border-border bg-background p-4 text-center sm:p-6">
           {pairing.status === 'connected' ? (
             <>
               <NetworkStatusPanel
@@ -283,7 +313,7 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
                 onClick={() => void pairing.createRoom()}
                 disabled={!online}
                 title={online ? undefined : 'You appear to be offline'}
-                className="mt-4 w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                className="mt-4 min-h-[48px] w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Get a new code
               </button>
@@ -302,12 +332,13 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
                     Scan to connect
                   </p>
                   {pairingUrl && (
-                    <div className="mx-auto mt-4 w-fit rounded-xl border border-border bg-white p-3">
+                    <div className="mx-auto mt-4 w-fit max-w-full rounded-xl border border-border bg-white p-3">
                       <QRCode
                         value={pairingUrl}
-                        size={168}
+                        size={192}
                         bgColor="#FFFFFF"
                         fgColor="#0F172A"
+                        style={{ height: 'auto', width: '100%', maxWidth: '192px' }}
                         aria-label={`QR code to connect to this transfer (code ${pairing.code})`}
                       />
                     </div>
@@ -322,24 +353,42 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
                     </span>
                     <span className="h-px flex-1 bg-border" />
                   </div>
-                  <p className="mt-3 font-mono text-4xl font-bold tracking-widest text-dark">
+                  <p className="mt-3 font-mono text-3xl font-bold tracking-widest text-dark sm:text-4xl">
                     {pairing.code}
                   </p>
-                  <button
-                    type="button"
-                    onClick={handleCopyCode}
-                    className="mx-auto mt-3 inline-flex items-center justify-center gap-1.5 rounded-lg border border-border bg-white px-4 py-2 text-sm font-semibold hover:border-primary hover:text-primary"
-                  >
-                    {copied ? (
-                      <>
-                        <Check size={15} aria-hidden /> Copied
-                      </>
-                    ) : (
-                      <>
-                        <Copy size={15} aria-hidden /> Copy Code
-                      </>
-                    )}
-                  </button>
+                  <div className="mx-auto mt-3 flex w-full max-w-xs flex-col gap-2 sm:flex-row sm:justify-center">
+                    <button
+                      type="button"
+                      onClick={handleCopyCode}
+                      className="inline-flex min-h-[44px] flex-1 items-center justify-center gap-1.5 rounded-lg border border-border bg-white px-4 py-2 text-sm font-semibold hover:border-primary hover:text-primary"
+                    >
+                      {copied ? (
+                        <>
+                          <Check size={15} aria-hidden /> Copied
+                        </>
+                      ) : (
+                        <>
+                          <Copy size={15} aria-hidden /> Copy Code
+                        </>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleShareLink}
+                      className="inline-flex min-h-[44px] flex-1 items-center justify-center gap-1.5 rounded-lg bg-dark px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
+                    >
+                      {linkCopied ? (
+                        <>
+                          <Check size={15} aria-hidden /> Link copied
+                        </>
+                      ) : (
+                        <>
+                          <Share2 size={15} aria-hidden />{' '}
+                          {canNativeShare ? 'Share link' : 'Copy link'}
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </>
               )}
               {pairingErrorCopy && (
@@ -355,7 +404,7 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
           <button
             type="button"
             onClick={handleBackToFiles}
-            className="mt-4 inline-flex w-full items-center justify-center rounded-lg border border-border bg-white px-4 py-2 text-sm font-semibold hover:border-primary hover:text-primary"
+            className="mt-4 inline-flex min-h-[48px] w-full items-center justify-center rounded-lg border border-border bg-white px-4 py-2 text-sm font-semibold hover:border-primary hover:text-primary"
           >
             Back to files
           </button>
@@ -369,7 +418,7 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
             if (continued) handleBackToFiles()
             else openPicker()
           }}
-          className="flex-1 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90"
+          className="min-h-[48px] flex-1 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90"
         >
           Send Files
         </button>
@@ -380,7 +429,7 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
             transfer.reset()
             onSwitchToReceive()
           }}
-          className="flex-1 rounded-lg border border-border bg-white px-4 py-2.5 text-sm font-semibold hover:border-primary hover:text-primary"
+          className="min-h-[48px] flex-1 rounded-lg border border-border bg-white px-4 py-2.5 text-sm font-semibold hover:border-primary hover:text-primary"
         >
           Receive Files
         </button>

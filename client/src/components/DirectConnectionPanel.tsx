@@ -77,7 +77,7 @@ export default function DirectConnectionPanel({
           <button
             type="button"
             onClick={onRetry}
-            className="mx-auto mt-3 inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
+            className="mx-auto mt-3 inline-flex min-h-[48px] items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
           >
             <RefreshCw size={15} aria-hidden /> {exhausted ? 'Retry' : 'Retry connection'}
           </button>

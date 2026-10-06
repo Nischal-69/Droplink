@@ -32,10 +32,10 @@ function App() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col bg-background text-dark">
+    <div className="flex min-h-screen flex-col bg-background text-dark pb-[env(safe-area-inset-bottom)]">
       <Header />
 
-      <main className="mx-auto flex w-full max-w-xl flex-1 flex-col items-center px-4 py-10 sm:px-6 sm:py-14">
+      <main className="mx-auto flex w-full max-w-xl flex-1 flex-col items-center px-4 py-6 sm:px-6 sm:py-14">
         <div className="text-center">
           <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
             Transfer files directly.

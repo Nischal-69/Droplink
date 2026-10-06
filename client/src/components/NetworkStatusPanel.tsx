@@ -144,7 +144,7 @@ export default function NetworkStatusPanel({ status, localRole, localDevice, pee
         )
       )}
 
-      <dl className="mx-auto mt-3 grid max-w-xs grid-cols-2 gap-2 text-left">
+      <dl className="mx-auto mt-3 grid max-w-xs grid-cols-1 gap-2 text-left min-[400px]:grid-cols-2">
         <div className="rounded-lg border border-border bg-white px-3 py-2">
           <dt className="text-[11px] font-semibold uppercase tracking-wide text-muted">
             {localTitle} • this device

@@ -16,7 +16,7 @@ function ProgressBar({ value, tall }: { value: number; tall?: boolean }) {
       aria-valuemin={0}
       aria-valuemax={100}
       aria-valuenow={clamped}
-      className={`w-full overflow-hidden rounded-full bg-background ring-1 ring-border ${tall ? 'h-2.5' : 'h-1.5'}`}
+      className={`w-full overflow-hidden rounded-full bg-background ring-1 ring-border ${tall ? 'h-3 sm:h-2.5' : 'h-1.5'}`}
     >
       <div className="h-full rounded-full bg-primary" style={{ width: `${clamped}%` }} />
     </div>
@@ -142,7 +142,7 @@ export default function TransferReceiver({
           <button
             type="button"
             onClick={transfer.dismissReceiveError}
-            className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-border bg-white px-4 py-2 text-sm font-semibold hover:border-primary hover:text-primary"
+            className="mt-2 inline-flex min-h-[48px] w-full items-center justify-center gap-1.5 rounded-lg border border-border bg-white px-4 py-2 text-sm font-semibold hover:border-primary hover:text-primary"
           >
             Dismiss
           </button>
@@ -171,7 +171,7 @@ export default function TransferReceiver({
             <ProgressBar value={activePercent} tall />
           </div>
           <div className="mt-2 flex items-baseline justify-between gap-2">
-            <p className="text-2xl font-bold text-dark">{Math.round(activePercent)}%</p>
+            <p className="text-3xl font-bold text-dark sm:text-2xl">{Math.round(activePercent)}%</p>
             <p className="text-xs text-muted">
               {formatBytes(active.receivedBytes)} / {formatBytes(active.size)}
             </p>
@@ -188,7 +188,7 @@ export default function TransferReceiver({
         <button
           type="button"
           onClick={() => transfer.cancelReceive(getChannel())}
-          className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-border bg-white px-4 py-2.5 text-sm font-semibold hover:border-danger hover:text-danger"
+          className="mt-2 inline-flex min-h-[48px] w-full items-center justify-center gap-1.5 rounded-lg border border-border bg-white px-4 py-2.5 text-sm font-semibold hover:border-danger hover:text-danger"
         >
           <X size={15} aria-hidden /> Cancel
         </button>
@@ -205,7 +205,7 @@ export default function TransferReceiver({
             type="button"
             onClick={() => void handleDownloadAll()}
             disabled={isZipping}
-            className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-dark px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-wait disabled:opacity-60"
+            className="mt-2 inline-flex min-h-[48px] w-full items-center justify-center gap-1.5 rounded-lg bg-dark px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-wait disabled:opacity-60"
           >
             <Archive size={15} aria-hidden />
             {isZipping ? 'Preparing ZIP…' : 'Download All (ZIP)'}
@@ -282,7 +282,7 @@ export default function TransferReceiver({
                   <a
                     href={item.blobUrl}
                     download={item.name}
-                    className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
+                    className="mt-2 inline-flex min-h-[48px] w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
                     aria-label={`Download ${displayName}`}
                   >
                     <Download size={15} aria-hidden /> Download
@@ -291,7 +291,7 @@ export default function TransferReceiver({
                   <button
                     type="button"
                     onClick={() => handleSingleDownload(item)}
-                    className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
+                    className="mt-2 inline-flex min-h-[48px] w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
                     aria-label={`Download ${displayName}`}
                   >
                     <Download size={15} aria-hidden /> Download

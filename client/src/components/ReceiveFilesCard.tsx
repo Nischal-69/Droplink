@@ -130,7 +130,7 @@ export default function ReceiveFilesCard({ onSwitchToSend, initialCode = '' }: P
   return (
     <section
       aria-label="Receive files"
-      className="mt-8 w-full rounded-xl border border-border bg-white p-6 sm:p-8"
+      className="mt-8 w-full rounded-xl border border-border bg-white p-4 sm:p-8"
     >
       <div className="flex items-center justify-center gap-2">
         <h2 className="text-center text-lg font-semibold">Receive files</h2>
@@ -141,7 +141,7 @@ export default function ReceiveFilesCard({ onSwitchToSend, initialCode = '' }: P
       </p>
       {!online && <OfflineBanner />}
 
-      <div className="mt-5 rounded-lg border border-border bg-background px-4 py-6">
+      <div className="mt-5 rounded-lg border border-border bg-background px-3 py-5 sm:px-4 sm:py-6">
         <DeviceIllustration />
 
         {isConnected && pairing.code ? (
@@ -169,7 +169,7 @@ export default function ReceiveFilesCard({ onSwitchToSend, initialCode = '' }: P
             <button
               type="button"
               onClick={handleDisconnect}
-              className="mx-auto mt-4 inline-flex items-center justify-center rounded-lg border border-border bg-white px-4 py-2 text-sm font-semibold hover:border-danger hover:text-danger"
+              className="mx-auto mt-4 inline-flex min-h-[48px] items-center justify-center rounded-lg border border-border bg-white px-4 py-2 text-sm font-semibold hover:border-danger hover:text-danger"
             >
               Disconnect
             </button>
@@ -188,12 +188,15 @@ export default function ReceiveFilesCard({ onSwitchToSend, initialCode = '' }: P
               id="receive-code"
               type="text"
               inputMode="numeric"
+              enterKeyHint="go"
+              autoCapitalize="off"
+              autoCorrect="off"
               autoComplete="one-time-code"
               placeholder="482 731"
               value={formatCodeInput(digits)}
               onChange={handleInputChange}
               disabled={isConnecting}
-              className="mt-2 w-full rounded-lg border border-border bg-white px-3 py-2.5 text-center font-mono text-2xl font-bold tracking-widest text-dark placeholder:text-muted/50 focus:border-primary focus:outline-none disabled:opacity-60"
+              className="mt-2 min-h-[56px] w-full rounded-lg border border-border bg-white px-3 py-2.5 text-center font-mono text-2xl font-bold tracking-widest text-dark placeholder:text-muted/50 focus:border-primary focus:outline-none disabled:opacity-60"
             />
             {pairing.status === 'disconnected' && pairingErrorCopy ? (
               <div className="mt-2" aria-live="polite">
@@ -219,7 +222,7 @@ export default function ReceiveFilesCard({ onSwitchToSend, initialCode = '' }: P
               type="submit"
               disabled={isConnecting || digits.length !== 6 || !online}
               title={online ? undefined : 'You appear to be offline'}
-              className="mt-3 w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+              className="mt-3 min-h-[48px] w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isConnecting ? 'Connecting...' : 'Connect'}
             </button>
@@ -235,7 +238,7 @@ export default function ReceiveFilesCard({ onSwitchToSend, initialCode = '' }: P
             transfer.reset()
             onSwitchToSend()
           }}
-          className="flex-1 rounded-lg border border-border bg-white px-4 py-2.5 text-sm font-semibold hover:border-primary hover:text-primary"
+          className="min-h-[48px] flex-1 rounded-lg border border-border bg-white px-4 py-2.5 text-sm font-semibold hover:border-primary hover:text-primary"
         >
           Send Files
         </button>
@@ -243,7 +246,7 @@ export default function ReceiveFilesCard({ onSwitchToSend, initialCode = '' }: P
           type="button"
           disabled
           title="You are on the Receive screen"
-          className="flex-1 cursor-default rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white"
+          className="min-h-[48px] flex-1 cursor-default rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white"
         >
           Receive Files
         </button>

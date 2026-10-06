@@ -5,7 +5,7 @@ export default function Footer() {
         <p className="text-xs text-muted">
           <span className="font-semibold text-dark">DropLink</span> • Same-network P2P sharing
         </p>
-        <p className="text-xs text-muted">UI preview — transfer functionality not implemented yet.</p>
+        <p className="text-xs text-muted">Direct device-to-device transfer. No cloud storage.</p>
       </div>
     </footer>
   )

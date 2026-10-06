@@ -2,7 +2,7 @@ import DropLinkLogo from './DropLinkLogo'
 
 export default function Header() {
   return (
-    <header className="border-b border-border bg-white">
+    <header className="sticky top-0 z-10 border-b border-border bg-white pt-[env(safe-area-inset-top)]">
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-3 px-4 sm:px-6">
         <div className="flex items-center gap-2.5">
           <DropLinkLogo size={32} />
