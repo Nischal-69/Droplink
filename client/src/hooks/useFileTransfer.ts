@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   PROGRESS_THROTTLE_MS,
   decodeControl,
+  encodeControl,
   transferFiles,
 } from '../utils/transferProtocol'
 import { Speedometer } from '../utils/transferStats'
@@ -58,9 +59,20 @@ export function useFileTransfer() {
   const [sendState, setSendState] = useState<SendState>('idle')
   const [sendError, setSendError] = useState<string | null>(null)
   const [sendProgress, setSendProgress] = useState<Record<string, SendProgress>>({})
+  /** True while the sender has paused chunk emission (offset preserved). */
+  const [sendPaused, setSendPaused] = useState(false)
   const [received, setReceived] = useState<ReceivedFile[]>([])
+  /** True while the sender has paused (set via `transfer-pause` frames). */
+  const [receivePaused, setReceivePaused] = useState(false)
 
   const abortRef = useRef(false)
+  const pausedRef = useRef(false)
+  /** True while our own send loop is running (to honor a peer's cancel). */
+  const sendActiveRef = useRef(false)
+  /** Transfer id of the active outgoing transfer (for pause/resume frames). */
+  const outgoingTransferIdRef = useRef<string | null>(null)
+  /** Transfer id of the active incoming transfer (for receiver cancel). */
+  const incomingTransferIdRef = useRef<string | null>(null)
   const incomingRef = useRef(new Map<string, IncomingAssembly>())
   const openFileRef = useRef<string | null>(null)
   const progressTickRef = useRef(0)
@@ -79,12 +91,18 @@ export function useFileTransfer() {
   /** Full reset: revoke downloads, clear progress, abort any send. */
   const reset = useCallback(() => {
     abortRef.current = true
+    pausedRef.current = false
+    sendActiveRef.current = false
+    outgoingTransferIdRef.current = null
+    incomingTransferIdRef.current = null
     incomingRef.current.clear()
     openFileRef.current = null
     revokeAll()
     setSendProgress({})
     setSendState('idle')
     setSendError(null)
+    setSendPaused(false)
+    setReceivePaused(false)
   }, [revokeAll])
 
   useEffect(() => {
@@ -222,9 +240,25 @@ export function useFileTransfer() {
           case 'transfer-complete': {
             const openId = openFileRef.current
             if (openId) finalizeFile(openId)
+            setReceivePaused(false)
             break
           }
+          case 'transfer-pause':
+            // Sender froze chunk emission; bytes stall until `transfer-resume`.
+            receiveMeterRef.current = null
+            setReceivePaused(true)
+            break
+          case 'transfer-resume':
+            receiveMeterRef.current = null
+            setReceivePaused(false)
+            break
           case 'transfer-cancel': {
+            setReceivePaused(false)
+            // A peer's cancel stops our own send loop too (own cancel frames
+            // never loop back over the channel, so this can't self-trigger).
+            if (sendActiveRef.current) {
+              abortRef.current = true
+            }
             const target = message.fileId ?? openFileRef.current
             if (target) {
               const assembly = incomingRef.current.get(target)
@@ -242,7 +276,9 @@ export function useFileTransfer() {
             break
           }
           case 'transfer-start':
-            // Informational only — files arrive via file-start frames.
+            // A fresh transfer clears any stale paused display.
+            incomingTransferIdRef.current = message.transferId
+            setReceivePaused(false)
             break
         }
         return
@@ -261,6 +297,83 @@ export function useFileTransfer() {
 
   const cancelSend = useCallback(() => {
     abortRef.current = true
+    pausedRef.current = false
+    setSendPaused(false)
+  }, [])
+
+  /**
+   * Real pause: the send loop stops emitting chunks and holds its exact
+   * byte offset; the peer is notified so it can show the paused state.
+   */
+  const pauseSend = useCallback(
+    (channel: RTCDataChannel | null) => {
+      if (sendState !== 'sending' || pausedRef.current) return
+      pausedRef.current = true
+      setSendPaused(true)
+      // Freeze the live speed readout — no bytes are flowing.
+      sendMeterRef.current = null
+      setSendProgress((prev) => {
+        const next = { ...prev }
+        for (const key of Object.keys(next)) {
+          if (!next[key].done) next[key] = { ...next[key], bps: 0 }
+        }
+        return next
+      })
+      try {
+        channel?.send(
+          encodeControl({ kind: 'transfer-pause', transferId: outgoingTransferIdRef.current ?? 'unknown' }),
+        )
+      } catch {
+        // Frame is advisory; the local loop is genuinely paused regardless.
+      }
+    },
+    [sendState],
+  )
+
+  /** Resume a paused send from the preserved offset. */
+  const resumeSend = useCallback(
+    (channel: RTCDataChannel | null) => {
+      if (sendState !== 'sending' || !pausedRef.current) return
+      pausedRef.current = false
+      setSendPaused(false)
+      sendMeterRef.current = null
+      try {
+        channel?.send(
+          encodeControl({ kind: 'transfer-resume', transferId: outgoingTransferIdRef.current ?? 'unknown' }),
+        )
+      } catch {
+        // Frame is advisory; the local loop genuinely resumes regardless.
+      }
+    },
+    [sendState],
+  )
+
+  /**
+   * Receiver-side cancel: tell the sender to stop, then drop partial
+   * buffers and mark in-flight files cancelled. Finished downloads are
+   * kept; only temporary transfer data is cleared.
+   */
+  const cancelReceive = useCallback((channel: RTCDataChannel | null) => {
+    try {
+      channel?.send(
+        encodeControl({ kind: 'transfer-cancel', transferId: incomingTransferIdRef.current ?? 'unknown' }),
+      )
+    } catch {
+      // Link may already be down — still clean up locally.
+    }
+    receiveMeterRef.current = null
+    setReceivePaused(false)
+    for (const assembly of incomingRef.current.values()) {
+      assembly.cancelled = true
+      assembly.parts = []
+    }
+    incomingRef.current.clear()
+    openFileRef.current = null
+    setReceived((prev) =>
+      prev.map((item) =>
+        item.done || item.cancelled ? item : { ...item, cancelled: true, waiting: false, bps: 0 },
+      ),
+    )
   }, [])
 
   const sendFiles = useCallback(async (channel: RTCDataChannel | null, files: OutgoingFile[]) => {
@@ -271,6 +384,10 @@ export function useFileTransfer() {
     }
     if (files.length === 0) return
     abortRef.current = false
+    pausedRef.current = false
+    setSendPaused(false)
+    sendActiveRef.current = true
+    outgoingTransferIdRef.current = null
     setSendError(null)
     setSendState('sending')
     setSendProgress(
@@ -293,12 +410,21 @@ export function useFileTransfer() {
     try {
       const outcome = await transferFiles(channel, files, {
         isAborted: () => abortRef.current,
+        isPaused: () => pausedRef.current,
         onProgress: markProgress,
+        onTransferId: (transferId) => {
+          outgoingTransferIdRef.current = transferId
+        },
       })
+      setSendPaused(false)
       setSendState(outcome.status === 'done' ? 'done' : 'cancelled')
     } catch (error) {
       setSendError(error instanceof Error ? error.message : 'Transfer failed.')
       setSendState('error')
+    } finally {
+      sendActiveRef.current = false
+      pausedRef.current = false
+      outgoingTransferIdRef.current = null
     }
   }, [])
 
@@ -306,9 +432,14 @@ export function useFileTransfer() {
     sendState,
     sendError,
     sendProgress,
+    sendPaused,
     received,
+    receivePaused,
     sendFiles,
+    pauseSend,
+    resumeSend,
     cancelSend,
+    cancelReceive,
     handleChannelMessage,
     reset,
   }

@@ -1,4 +1,4 @@
-import { Check, RefreshCw, Send, X } from 'lucide-react'
+import { Check, Pause, Play, RefreshCw, Send, X } from 'lucide-react'
 import type { FileTransfer } from '../hooks/useFileTransfer'
 import { formatBytes } from '../utils/formatBytes'
 import { formatEta, formatSpeed, progressPercent } from '../utils/transferStats'
@@ -30,6 +30,7 @@ export default function TransferSender({ files, transfer, getChannel }: Props) {
   const totalBytes = files.reduce((sum, item) => sum + item.file.size, 0)
   const summary = `${files.length} ${files.length === 1 ? 'file' : 'files'} • ${formatBytes(totalBytes)}`
   const isSending = transfer.sendState === 'sending'
+  const isPaused = isSending && transfer.sendPaused
   const active = files.find((item) => !transfer.sendProgress[item.id]?.done) ?? files[0]
 
   const handleSend = () => {
@@ -46,9 +47,11 @@ export default function TransferSender({ files, transfer, getChannel }: Props) {
       <div
         className="mt-3 rounded-lg border border-border bg-background p-4"
         aria-live="polite"
-        aria-label={`Sending ${active.file.name}, ${Math.round(percent)} percent`}
+        aria-label={`${isPaused ? 'Paused' : 'Sending'} ${active.file.name}, ${Math.round(percent)} percent`}
       >
-        <p className="text-xs font-semibold uppercase tracking-wide text-muted">Sending</p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted">
+          {isPaused ? 'Paused' : 'Sending'}
+        </p>
         <p className="mt-1 truncate text-sm font-semibold text-dark" title={active.file.name}>
           {active.file.name}
         </p>
@@ -62,8 +65,14 @@ export default function TransferSender({ files, transfer, getChannel }: Props) {
           </p>
         </div>
         <p className="mt-1 text-xs text-muted">
-          Speed: {bps > 0 ? formatSpeed(bps) : 'measuring…'} • Time remaining:{' '}
-          {formatEta(active.file.size, sent, bps)}
+          {isPaused ? (
+            'Paused — no chunks are being sent. Progress is preserved.'
+          ) : (
+            <>
+              Speed: {bps > 0 ? formatSpeed(bps) : 'measuring…'} • Time remaining:{' '}
+              {formatEta(active.file.size, sent, bps)}
+            </>
+          )}
         </p>
       </div>
     )
@@ -85,9 +94,11 @@ export default function TransferSender({ files, transfer, getChannel }: Props) {
             ? null
             : progress?.done
               ? '100%'
-              : item.id === active?.id && isSending
-                ? `${Math.round(percent)}%`
-                : 'waiting'
+              : isPaused && item.id === active?.id
+                ? 'paused'
+                : item.id === active?.id && isSending
+                  ? `${Math.round(percent)}%`
+                  : 'waiting'
           return (
             <li
               key={item.id}
@@ -141,13 +152,32 @@ export default function TransferSender({ files, transfer, getChannel }: Props) {
       )}
 
       {isSending && (
-        <button
-          type="button"
-          onClick={transfer.cancelSend}
-          className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-border bg-white px-4 py-2.5 text-sm font-semibold hover:border-danger hover:text-danger"
-        >
-          <X size={15} aria-hidden /> Cancel transfer
-        </button>
+        <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+          {isPaused ? (
+            <button
+              type="button"
+              onClick={() => transfer.resumeSend(getChannel())}
+              className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90"
+            >
+              <Play size={15} aria-hidden /> Resume
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => transfer.pauseSend(getChannel())}
+              className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-border bg-white px-4 py-2.5 text-sm font-semibold hover:border-primary hover:text-primary"
+            >
+              <Pause size={15} aria-hidden /> Pause
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={transfer.cancelSend}
+            className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-border bg-white px-4 py-2.5 text-sm font-semibold hover:border-danger hover:text-danger"
+          >
+            <X size={15} aria-hidden /> Cancel
+          </button>
+        </div>
       )}
 
       {transfer.sendState === 'done' && (

@@ -147,7 +147,7 @@ export default function ReceiveFilesCard({ onSwitchToSend, initialCode = '' }: P
                 rtcError={webrtc.rtcError}
                 onRetry={webrtc.retry}
               >
-                <TransferReceiver transfer={transfer} />
+                <TransferReceiver transfer={transfer} getChannel={webrtc.getChannel} />
               </DirectConnectionPanel>
             </div>
             <button

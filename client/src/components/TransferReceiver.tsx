@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Archive, Check, Download } from 'lucide-react'
+import { Archive, Check, Download, Pause, X } from 'lucide-react'
 import type { FileTransfer, ReceivedFile } from '../hooks/useFileTransfer'
 import { formatBytes } from '../utils/formatBytes'
 import { progressPercent } from '../utils/transferStats'
@@ -45,7 +45,13 @@ function downloadViaAnchor(url: string, filename: string) {
 }
 
 /** Receiver transfer UI with real byte-driven progress — shown once the channel is open. */
-export default function TransferReceiver({ transfer }: { transfer: FileTransfer }) {
+export default function TransferReceiver({
+  transfer,
+  getChannel,
+}: {
+  transfer: FileTransfer
+  getChannel: () => RTCDataChannel | null
+}) {
   const [isZipping, setIsZipping] = useState(false)
   const [zipError, setZipError] = useState<string | null>(null)
 
@@ -58,6 +64,8 @@ export default function TransferReceiver({ transfer }: { transfer: FileTransfer 
   }
 
   const active = transfer.received.find((item) => !item.done && !item.cancelled)
+  const hasActive = active !== undefined
+  const isPaused = transfer.receivePaused && hasActive
   const activePercent = active ? progressPercent(active.receivedBytes, active.size) : 0
   const completed = transfer.received.filter(
     (item) => item.done && !item.cancelled && (item.blobUrl || item.blob),
@@ -118,9 +126,18 @@ export default function TransferReceiver({ transfer }: { transfer: FileTransfer 
         <div
           className="rounded-lg border border-border bg-background p-4"
           aria-live="polite"
-          aria-label={`Receiving ${active.name}, ${Math.round(activePercent)} percent`}
+          aria-label={`${isPaused ? 'Paused' : 'Receiving'} ${active.name}, ${Math.round(activePercent)} percent`}
         >
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted">Receiving</p>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted">
+              {isPaused ? 'Paused by sender' : 'Receiving'}
+            </p>
+            {isPaused && (
+              <span className="inline-flex items-center gap-1 rounded-lg bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">
+                <Pause size={12} aria-hidden /> Paused
+              </span>
+            )}
+          </div>
           <p className="mt-1 truncate text-sm font-semibold text-dark" title={active.name}>
             {active.name}
           </p>
@@ -133,7 +150,22 @@ export default function TransferReceiver({ transfer }: { transfer: FileTransfer 
               {formatBytes(active.receivedBytes)} / {formatBytes(active.size)}
             </p>
           </div>
+          {isPaused && (
+            <p className="mt-1 text-xs text-muted">
+              No data is arriving. Your received progress is preserved and resumes automatically.
+            </p>
+          )}
         </div>
+      )}
+
+      {hasActive && (
+        <button
+          type="button"
+          onClick={() => transfer.cancelReceive(getChannel())}
+          className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-border bg-white px-4 py-2.5 text-sm font-semibold hover:border-danger hover:text-danger"
+        >
+          <X size={15} aria-hidden /> Cancel
+        </button>
       )}
 
       {completed.length > 1 && (
@@ -201,7 +233,7 @@ export default function TransferReceiver({ transfer }: { transfer: FileTransfer 
                   </div>
                   <p className="text-xs text-muted">
                     {item.cancelled
-                      ? 'Cancelled by sender'
+                      ? 'Cancelled'
                       : item.done
                         ? formatBytes(item.size)
                         : isWaiting
