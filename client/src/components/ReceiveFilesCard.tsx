@@ -97,6 +97,14 @@ export default function ReceiveFilesCard({ onSwitchToSend, initialCode = '' }: P
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Keep the transfer hook's control channel in sync so it can answer the
+  // sender's resume queries and send receiver-side cancel frames.
+  const { setPeerChannel: syncPeerChannel } = transfer
+  const receiverChannel = webrtc.rtcStatus === 'open' ? webrtc.getChannel() : null
+  useEffect(() => {
+    syncPeerChannel(receiverChannel)
+  }, [syncPeerChannel, receiverChannel])
+
   const handleInputChange = (event: ChangeEvent<HTMLInputElement>) => {
     setDigits(event.target.value.replace(/\D/g, '').slice(0, 6))
   }
@@ -146,6 +154,8 @@ export default function ReceiveFilesCard({ onSwitchToSend, initialCode = '' }: P
                 rtcStatus={webrtc.rtcStatus}
                 rtcError={webrtc.rtcError}
                 onRetry={webrtc.retry}
+                transferActive={transfer.received.some((item) => !item.done && !item.cancelled)}
+                autoRetry={webrtc.autoRetry}
               >
                 <TransferReceiver transfer={transfer} getChannel={webrtc.getChannel} />
               </DirectConnectionPanel>

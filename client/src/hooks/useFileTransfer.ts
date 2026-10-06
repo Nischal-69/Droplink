@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   PROGRESS_THROTTLE_MS,
+  TransferInterruptedError,
+  clampResumeOffset,
   decodeControl,
   encodeControl,
   transferFiles,
+  truncateParts,
 } from '../utils/transferProtocol'
 import { Speedometer } from '../utils/transferStats'
 
-export type SendState = 'idle' | 'sending' | 'done' | 'error' | 'cancelled'
+export type SendState = 'idle' | 'sending' | 'resuming' | 'interrupted' | 'done' | 'error' | 'cancelled'
 
 export type SendProgress = {
   sentBytes: number
@@ -40,12 +43,55 @@ type OutgoingFile = {
 
 type IncomingAssembly = {
   fileId: string
+  transferId: string
   name: string
   size: number
   mime: string
-  parts: BlobPart[]
+  parts: ArrayBuffer[]
   received: number
   cancelled: boolean
+  finalized: boolean
+}
+
+/** Receiver has this long to answer a resume query before resume is abandoned. */
+const RESUME_QUERY_TIMEOUT_MS = 8000
+
+/**
+ * Ask the receiver how many bytes of each file it durably holds, so a
+ * resumed send continues from the last confirmed chunk instead of zero.
+ * Rejects with TransferInterruptedError on timeout or a dead channel.
+ */
+function queryResumeOffsets(
+  channel: { readonly readyState: string; send(data: string): void },
+  transferId: string,
+  files: { id: string; file: { name: string; size: number } }[],
+  pending: Map<string, (receivedBytes: number) => void>,
+  timeoutMs = RESUME_QUERY_TIMEOUT_MS,
+): Promise<Record<string, number>> {
+  const jobs = files.map(
+    ({ id: fileId, file }) =>
+      new Promise<[string, number]>((resolve, reject) => {
+        const key = `${transferId}:${fileId}`
+        const timer = globalThis.setTimeout(() => {
+          pending.delete(key)
+          reject(new TransferInterruptedError(`No resume answer for "${file.name}".`))
+        }, timeoutMs)
+        pending.set(key, (receivedBytes: number) => {
+          globalThis.clearTimeout(timer)
+          pending.delete(key)
+          resolve([fileId, clampResumeOffset(receivedBytes, file.size)])
+        })
+        try {
+          if (channel.readyState !== 'open') throw new TransferInterruptedError()
+          channel.send(encodeControl({ kind: 'resume-query', transferId, fileId }))
+        } catch {
+          globalThis.clearTimeout(timer)
+          pending.delete(key)
+          reject(new TransferInterruptedError())
+        }
+      }),
+  )
+  return Promise.all(jobs).then((entries) => Object.fromEntries(entries))
 }
 
 /**
@@ -73,6 +119,14 @@ export function useFileTransfer() {
   const outgoingTransferIdRef = useRef<string | null>(null)
   /** Transfer id of the active incoming transfer (for receiver cancel). */
   const incomingTransferIdRef = useRef<string | null>(null)
+  /** Channel used for receiver-side control frames (resume answers, cancel). */
+  const peerChannelRef = useRef<{ send(data: string): void } | null>(null)
+  /** Snapshot of an interrupted send so it can be resumed from confirmed offsets. */
+  const interruptedRef = useRef<{ transferId: string; files: OutgoingFile[] } | null>(null)
+  /** Bumped on reset/fresh send so stale resume queries can't act afterwards. */
+  const epochRef = useRef(0)
+  /** Pending resume-query resolvers keyed by `transferId:fileId`. */
+  const pendingResumeRef = useRef(new Map<string, (receivedBytes: number) => void>())
   const incomingRef = useRef(new Map<string, IncomingAssembly>())
   const openFileRef = useRef<string | null>(null)
   const progressTickRef = useRef(0)
@@ -93,8 +147,13 @@ export function useFileTransfer() {
     abortRef.current = true
     pausedRef.current = false
     sendActiveRef.current = false
+    epochRef.current += 1
     outgoingTransferIdRef.current = null
     incomingTransferIdRef.current = null
+    peerChannelRef.current = null
+    interruptedRef.current = null
+    for (const resolve of pendingResumeRef.current.values()) resolve(-1)
+    pendingResumeRef.current.clear()
     incomingRef.current.clear()
     openFileRef.current = null
     revokeAll()
@@ -116,7 +175,8 @@ export function useFileTransfer() {
 
   const finalizeFile = useCallback((fileId: string) => {
     const assembly = incomingRef.current.get(fileId)
-    if (!assembly || assembly.cancelled) return
+    if (!assembly || assembly.cancelled || assembly.finalized) return
+    assembly.finalized = true
     const blob = new Blob(assembly.parts, {
       type: assembly.mime || 'application/octet-stream',
     })
@@ -130,6 +190,14 @@ export function useFileTransfer() {
           : item,
       ),
     )
+  }, [])
+
+  /**
+   * Channel used for receiver-side control frames (resume answers, cancel).
+   * Synced from the live DataChannel by the hosting card.
+   */
+  const setPeerChannel = useCallback((channel: { send(data: string): void } | null) => {
+    peerChannelRef.current = channel
   }, [])
 
   const pushProgress = useCallback(
@@ -157,7 +225,7 @@ export function useFileTransfer() {
       const fileId = openFileRef.current
       if (!fileId) return
       const assembly = incomingRef.current.get(fileId)
-      if (!assembly || assembly.cancelled) return
+      if (!assembly || assembly.cancelled || assembly.finalized) return
       assembly.parts.push(buffer)
       assembly.received += buffer.byteLength
       if (assembly.received >= assembly.size) {
@@ -179,14 +247,53 @@ export function useFileTransfer() {
         if (!message) return
         switch (message.kind) {
           case 'file-start': {
+            const existing = incomingRef.current.get(message.fileId)
+            if (existing && existing.transferId === message.transferId && !existing.cancelled) {
+              if (existing.finalized) {
+                // Duplicate announce for an already-complete file — keep the download.
+                break
+              }
+              // Same-transfer resume: keep confirmed bytes, trim anything past
+              // the sender's offset so the prefix stays exact.
+              const resumeOffset = clampResumeOffset(message.offset ?? 0, message.size)
+              const trimmed = truncateParts(existing.parts, existing.received, resumeOffset)
+              existing.parts = trimmed.parts
+              existing.received = trimmed.receivedBytes
+              existing.name = message.name
+              existing.size = message.size
+              existing.mime = message.mime
+              openFileRef.current = message.fileId
+              setReceived((prev) =>
+                prev.map((item) =>
+                  item.fileId === message.fileId
+                    ? {
+                        ...item,
+                        name: message.name,
+                        size: message.size,
+                        mime: message.mime,
+                        receivedBytes: trimmed.receivedBytes,
+                        done: false,
+                        cancelled: false,
+                        waiting: false,
+                        bps: 0,
+                      }
+                    : item,
+                ),
+              )
+              if (message.size === 0) finalizeFile(message.fileId)
+              break
+            }
+            // Fresh start (new transfer, restarted file, or unknown assembly).
             incomingRef.current.set(message.fileId, {
               fileId: message.fileId,
+              transferId: message.transferId,
               name: message.name,
               size: message.size,
               mime: message.mime,
               parts: [],
               received: 0,
               cancelled: false,
+              finalized: false,
             })
             openFileRef.current = message.fileId
             setReceived((prev) => {
@@ -203,7 +310,10 @@ export function useFileTransfer() {
                 blob: null,
                 bps: 0,
               }
-              if (prev.some((item) => item.fileId === message.fileId)) {
+              const found = prev.find((item) => item.fileId === message.fileId)
+              // Never clobber a completed download with a stale announce.
+              if (found?.done && !found.cancelled) return prev
+              if (found) {
                 return prev.map((item) => (item.fileId === message.fileId ? entry : item))
               }
               return [...prev, entry]
@@ -262,17 +372,49 @@ export function useFileTransfer() {
             const target = message.fileId ?? openFileRef.current
             if (target) {
               const assembly = incomingRef.current.get(target)
-              if (assembly) {
+              // Never let a late cancel nuke a completed download.
+              if (assembly && !assembly.finalized) {
                 assembly.cancelled = true
                 assembly.parts = []
               }
               if (openFileRef.current === target) openFileRef.current = null
               setReceived((prev) =>
                 prev.map((item) =>
-                  item.fileId === target ? { ...item, cancelled: true, waiting: false } : item,
+                  item.fileId === target && !item.done
+                    ? { ...item, cancelled: true, waiting: false }
+                    : item,
                 ),
               )
             }
+            break
+          }
+          case 'resume-query': {
+            // Report durably-held bytes so the sender resumes from the last
+            // confirmed chunk. Unknown/cancelled files answer 0 (full resend).
+            const assembly = incomingRef.current.get(message.fileId)
+            const held =
+              assembly &&
+              assembly.transferId === message.transferId &&
+              !assembly.cancelled
+                ? Math.min(assembly.received, assembly.size)
+                : 0
+            try {
+              peerChannelRef.current?.send(
+                encodeControl({
+                  kind: 'resume-state',
+                  transferId: message.transferId,
+                  fileId: message.fileId,
+                  receivedBytes: held,
+                }),
+              )
+            } catch {
+              // Sender will time out and stay interrupted — retryable.
+            }
+            break
+          }
+          case 'resume-state': {
+            const key = `${message.transferId}:${message.fileId}`
+            pendingResumeRef.current.get(key)?.(message.receivedBytes)
             break
           }
           case 'transfer-start':
@@ -307,7 +449,7 @@ export function useFileTransfer() {
    */
   const pauseSend = useCallback(
     (channel: RTCDataChannel | null) => {
-      if (sendState !== 'sending' || pausedRef.current) return
+      if ((sendState !== 'sending' && sendState !== 'resuming') || pausedRef.current) return
       pausedRef.current = true
       setSendPaused(true)
       // Freeze the live speed readout — no bytes are flowing.
@@ -333,7 +475,7 @@ export function useFileTransfer() {
   /** Resume a paused send from the preserved offset. */
   const resumeSend = useCallback(
     (channel: RTCDataChannel | null) => {
-      if (sendState !== 'sending' || !pausedRef.current) return
+      if ((sendState !== 'sending' && sendState !== 'resuming') || !pausedRef.current) return
       pausedRef.current = false
       setSendPaused(false)
       sendMeterRef.current = null
@@ -376,6 +518,19 @@ export function useFileTransfer() {
     )
   }, [])
 
+  const reportSendProgress = useCallback((fileId: string, sentBytes: number, done: boolean) => {
+    let slot = sendMeterRef.current
+    if (!slot || slot.fileId !== fileId) {
+      slot = { fileId, meter: new Speedometer() }
+      sendMeterRef.current = slot
+    }
+    const bps = done ? 0 : slot.meter.push(sentBytes)
+    const now = Date.now()
+    if (!done && now - progressTickRef.current < PROGRESS_THROTTLE_MS) return
+    progressTickRef.current = now
+    setSendProgress((prev) => ({ ...prev, [fileId]: { sentBytes, done, bps } }))
+  }, [])
+
   const sendFiles = useCallback(async (channel: RTCDataChannel | null, files: OutgoingFile[]) => {
     if (!channel || channel.readyState !== 'open') {
       setSendError('Direct connection is not open.')
@@ -387,46 +542,116 @@ export function useFileTransfer() {
     pausedRef.current = false
     setSendPaused(false)
     sendActiveRef.current = true
+    epochRef.current += 1
     outgoingTransferIdRef.current = null
+    interruptedRef.current = null
     setSendError(null)
     setSendState('sending')
     setSendProgress(
       Object.fromEntries(files.map(({ id }) => [id, { sentBytes: 0, done: false, bps: 0 }])),
     )
 
-    const markProgress = (fileId: string, sentBytes: number, done: boolean) => {
-      let slot = sendMeterRef.current
-      if (!slot || slot.fileId !== fileId) {
-        slot = { fileId, meter: new Speedometer() }
-        sendMeterRef.current = slot
-      }
-      const bps = done ? 0 : slot.meter.push(sentBytes)
-      const now = Date.now()
-      if (!done && now - progressTickRef.current < PROGRESS_THROTTLE_MS) return
-      progressTickRef.current = now
-      setSendProgress((prev) => ({ ...prev, [fileId]: { sentBytes, done, bps } }))
-    }
-
     try {
       const outcome = await transferFiles(channel, files, {
         isAborted: () => abortRef.current,
         isPaused: () => pausedRef.current,
-        onProgress: markProgress,
+        onProgress: reportSendProgress,
         onTransferId: (transferId) => {
           outgoingTransferIdRef.current = transferId
         },
       })
       setSendPaused(false)
+      outgoingTransferIdRef.current = null
+      interruptedRef.current = null
       setSendState(outcome.status === 'done' ? 'done' : 'cancelled')
     } catch (error) {
-      setSendError(error instanceof Error ? error.message : 'Transfer failed.')
-      setSendState('error')
+      if (error instanceof TransferInterruptedError) {
+        // Connection dropped mid-transfer: keep progress + files so resume
+        // can continue from the last confirmed chunk.
+        interruptedRef.current = {
+          transferId: outgoingTransferIdRef.current ?? `tx-${Date.now()}`,
+          files,
+        }
+        setSendPaused(false)
+        setSendError(null)
+        setSendState('interrupted')
+      } else {
+        outgoingTransferIdRef.current = null
+        interruptedRef.current = null
+        setSendError(error instanceof Error ? error.message : 'Transfer failed.')
+        setSendState('error')
+      }
     } finally {
       sendActiveRef.current = false
       pausedRef.current = false
-      outgoingTransferIdRef.current = null
     }
-  }, [])
+  }, [reportSendProgress])
+
+  /**
+   * Resume an interrupted send on a fresh channel: ask the receiver what it
+   * durably holds per file, then continue each file from that confirmed
+   * offset under the same transfer id. Completed files are verified, not
+   * re-sent; only genuinely missing bytes travel again.
+   */
+  const resumeTransfer = useCallback(async (channel: RTCDataChannel | null) => {
+    const snapshot = interruptedRef.current
+    if (!snapshot || sendState !== 'interrupted') return
+    if (!channel || channel.readyState !== 'open') return
+    const epoch = epochRef.current
+    const { transferId, files } = snapshot
+    outgoingTransferIdRef.current = transferId
+    sendActiveRef.current = true
+    abortRef.current = false
+    setSendError(null)
+    setSendState('resuming')
+    sendMeterRef.current = null
+    try {
+      const offsets = await queryResumeOffsets(channel, transferId, files, pendingResumeRef.current)
+      if (epoch !== epochRef.current) return
+      if (abortRef.current) {
+        try {
+          channel.send(encodeControl({ kind: 'transfer-cancel', transferId }))
+        } catch {
+          // Link state already handled by the interrupted snapshot.
+        }
+        interruptedRef.current = null
+        outgoingTransferIdRef.current = null
+        setSendState('cancelled')
+        return
+      }
+      const outcome = await transferFiles(channel, files, {
+        transferId,
+        startOffsets: offsets,
+        isAborted: () => abortRef.current,
+        isPaused: () => pausedRef.current,
+        onProgress: reportSendProgress,
+        onTransferId: (id) => {
+          outgoingTransferIdRef.current = id
+        },
+      })
+      if (epoch !== epochRef.current) return
+      setSendPaused(false)
+      outgoingTransferIdRef.current = null
+      interruptedRef.current = null
+      setSendState(outcome.status === 'done' ? 'done' : 'cancelled')
+    } catch (error) {
+      if (epoch !== epochRef.current) return
+      if (error instanceof TransferInterruptedError) {
+        // Still recoverable: progress (including resume gains, already
+        // reported via onProgress) is preserved for another attempt.
+        setSendPaused(false)
+        setSendState('interrupted')
+      } else {
+        interruptedRef.current = null
+        outgoingTransferIdRef.current = null
+        setSendError(error instanceof Error ? error.message : 'Transfer failed.')
+        setSendState('error')
+      }
+    } finally {
+      sendActiveRef.current = false
+      pausedRef.current = false
+    }
+  }, [reportSendProgress, sendState])
 
   return {
     sendState,
@@ -436,6 +661,8 @@ export function useFileTransfer() {
     received,
     receivePaused,
     sendFiles,
+    resumeTransfer,
+    setPeerChannel,
     pauseSend,
     resumeSend,
     cancelSend,

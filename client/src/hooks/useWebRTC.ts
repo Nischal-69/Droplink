@@ -16,11 +16,26 @@ const RTC_CONFIG: RTCConfiguration = {
 
 export const DATA_CHANNEL_LABEL = 'droplink-files'
 const OPEN_TIMEOUT_MS = 30000
+/** Bounded automatic reconnection attempts after a drop (manual retry is unlimited). */
+const MAX_AUTO_RETRIES = 5
+const autoRetryDelayMs = (attempt: number) => 1000 * 2 ** attempt
+
+export type AutoRetryState = {
+  /** True while a reconnection attempt is scheduled or the fresh handshake is running. */
+  active: boolean
+  /** Auto re-attempts initiated so far (1-based for display). */
+  attempt: number
+  max: number
+}
 
 /**
  * Reliable WebRTC DataChannel hook. Socket.IO carries SDP/ICE only —
  * file bytes never touch the socket. The channel is `{ ordered: true }`.
  * `active` must be true only while both peers share the room (pairing connected).
+ *
+ * When an established (or handshaking) connection drops while `active`,
+ * reconnection is attempted automatically with backoff (up to
+ * MAX_AUTO_RETRIES); afterwards the caller can still retry manually.
  */
 export function useWebRTC({
   getSocket,
@@ -39,8 +54,11 @@ export function useWebRTC({
   const [rtcStatus, setRtcStatus] = useState<RtcStatus>('idle')
   const [rtcError, setRtcError] = useState<string | null>(null)
   const [attempt, setAttempt] = useState(0)
+  const [autoRetry, setAutoRetry] = useState<AutoRetryState>({ active: false, attempt: 0, max: MAX_AUTO_RETRIES })
   const pcRef = useRef<RTCPeerConnection | null>(null)
   const channelRef = useRef<RTCDataChannel | null>(null)
+  const autoTimerRef = useRef<number | null>(null)
+  const autoCountRef = useRef(0)
   const onMessageRef = useRef(onMessage)
   onMessageRef.current = onMessage
 
@@ -50,6 +68,13 @@ export function useWebRTC({
     if (role === 'receiver' && roomId && socket?.connected) {
       socket.emit('signal', { roomId, type: 'restart-request', payload: {} })
     }
+    // Manual retry starts a fresh cycle: clear any scheduled auto attempt.
+    if (autoTimerRef.current !== null) {
+      window.clearTimeout(autoTimerRef.current)
+      autoTimerRef.current = null
+    }
+    autoCountRef.current = 0
+    setAutoRetry({ active: false, attempt: 0, max: MAX_AUTO_RETRIES })
     setAttempt((a) => a + 1)
   }, [getSocket, role, roomId])
 
@@ -78,6 +103,43 @@ export function useWebRTC({
       if (disposed) return
       setRtcError(message)
       setRtcStatus('failed')
+      scheduleReconnect()
+    }
+
+    /**
+     * Attempt reconnection automatically with backoff while the session is
+     * still active. Stops after MAX_AUTO_RETRIES — the UI then offers a
+     * manual retry which starts a fresh auto cycle.
+     */
+    const scheduleReconnect = () => {
+      if (disposed) return
+      if (autoTimerRef.current !== null) return
+      if (autoCountRef.current >= MAX_AUTO_RETRIES) {
+        setAutoRetry({ active: false, attempt: autoCountRef.current, max: MAX_AUTO_RETRIES })
+        return
+      }
+      const waitMs = autoRetryDelayMs(autoCountRef.current)
+      setAutoRetry({ active: true, attempt: autoCountRef.current + 1, max: MAX_AUTO_RETRIES })
+      autoTimerRef.current = window.setTimeout(() => {
+        autoTimerRef.current = null
+        if (disposed) return
+        autoCountRef.current += 1
+        // Mirror manual retry: a re-handshaking receiver nudges the sender.
+        const sock = getSocket()
+        if (role === 'receiver' && roomId && sock?.connected) {
+          sock.emit('signal', { roomId, type: 'restart-request', payload: {} })
+        }
+        setAttempt((a) => a + 1)
+      }, waitMs)
+    }
+
+    const noteOpen = () => {
+      if (autoTimerRef.current !== null) {
+        window.clearTimeout(autoTimerRef.current)
+        autoTimerRef.current = null
+      }
+      autoCountRef.current = 0
+      setAutoRetry({ active: false, attempt: 0, max: MAX_AUTO_RETRIES })
     }
 
     const flushIce = async () => {
@@ -99,12 +161,16 @@ export function useWebRTC({
       channel.onopen = () => {
         if (disposed) return
         window.clearTimeout(watchdog)
+        noteOpen()
         setRtcError(null)
         setRtcStatus('open')
       }
       channel.onclose = () => {
         if (disposed) return
-        setRtcStatus((prev) => (prev === 'open' ? 'closed' : prev))
+        // Any channel close mid-session (before or after open) is an
+        // interruption worth recovering from — not just post-open drops.
+        setRtcStatus('closed')
+        scheduleReconnect()
       }
     }
 
@@ -178,6 +244,7 @@ export function useWebRTC({
             fail('Direct connection failed. Both devices must be reachable on the same network.')
           } else if (pc.connectionState === 'closed') {
             setRtcStatus('closed')
+            scheduleReconnect()
           }
         }
         pc.ondatachannel = (event) => {
@@ -206,6 +273,10 @@ export function useWebRTC({
     return () => {
       disposed = true
       window.clearTimeout(watchdog)
+      if (autoTimerRef.current !== null) {
+        window.clearTimeout(autoTimerRef.current)
+        autoTimerRef.current = null
+      }
       socket.off('signal', onSignal)
       try {
         channelRef.current?.close()
@@ -223,5 +294,5 @@ export function useWebRTC({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, roomId, role, attempt])
 
-  return { rtcStatus, rtcError, retry, getChannel }
+  return { rtcStatus, rtcError, retry, getChannel, autoRetry }
 }

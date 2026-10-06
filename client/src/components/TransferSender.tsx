@@ -8,6 +8,10 @@ type Props = {
   files: { id: string; file: File }[]
   transfer: FileTransfer
   getChannel: () => RTCDataChannel | null
+  /** True while the DataChannel is open (used to pick the recovery message). */
+  channelOpen: boolean
+  /** Retry recovery: resume from confirmed offsets, or reconnect first. */
+  onRetry: () => void
 }
 
 function ProgressBar({ value, tall }: { value: number; tall?: boolean }) {
@@ -26,32 +30,38 @@ function ProgressBar({ value, tall }: { value: number; tall?: boolean }) {
 }
 
 /** Sender transfer UI with real byte-driven progress — shown once the channel is open. */
-export default function TransferSender({ files, transfer, getChannel }: Props) {
+export default function TransferSender({ files, transfer, getChannel, channelOpen, onRetry }: Props) {
   const totalBytes = files.reduce((sum, item) => sum + item.file.size, 0)
   const summary = `${files.length} ${files.length === 1 ? 'file' : 'files'} • ${formatBytes(totalBytes)}`
   const isSending = transfer.sendState === 'sending'
-  const isPaused = isSending && transfer.sendPaused
+  const isResuming = transfer.sendState === 'resuming'
+  const isActive = isSending || isResuming
+  const isPaused = isActive && transfer.sendPaused
+  const isInterrupted = transfer.sendState === 'interrupted'
   const active = files.find((item) => !transfer.sendProgress[item.id]?.done) ?? files[0]
+  const preservedBytes = files.reduce(
+    (sum, item) => sum + Math.min(transfer.sendProgress[item.id]?.sentBytes ?? 0, item.file.size),
+    0,
+  )
 
   const handleSend = () => {
     void transfer.sendFiles(getChannel(), files)
   }
 
   const renderLivePanel = () => {
-    if (!active || !isSending) return null
+    if (!active || !isActive) return null
     const progress = transfer.sendProgress[active.id]
     const sent = progress?.sentBytes ?? 0
     const bps = progress?.bps ?? 0
     const percent = progressPercent(sent, active.file.size)
+    const phase = isPaused ? 'Paused' : isResuming ? 'Resuming' : 'Sending'
     return (
       <div
         className="mt-3 rounded-lg border border-border bg-background p-4"
         aria-live="polite"
-        aria-label={`${isPaused ? 'Paused' : 'Sending'} ${active.file.name}, ${Math.round(percent)} percent`}
+        aria-label={`${phase} ${active.file.name}, ${Math.round(percent)} percent`}
       >
-        <p className="text-xs font-semibold uppercase tracking-wide text-muted">
-          {isPaused ? 'Paused' : 'Sending'}
-        </p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted">{phase}</p>
         <p className="mt-1 truncate text-sm font-semibold text-dark" title={active.file.name}>
           {active.file.name}
         </p>
@@ -67,6 +77,8 @@ export default function TransferSender({ files, transfer, getChannel }: Props) {
         <p className="mt-1 text-xs text-muted">
           {isPaused ? (
             'Paused — no chunks are being sent. Progress is preserved.'
+          ) : isResuming ? (
+            'Resuming from the last confirmed chunk — already-received bytes are not re-sent.'
           ) : (
             <>
               Speed: {bps > 0 ? formatSpeed(bps) : 'measuring…'} • Time remaining:{' '}
@@ -89,14 +101,14 @@ export default function TransferSender({ files, transfer, getChannel }: Props) {
           const progress = transfer.sendProgress[item.id]
           const sent = progress?.sentBytes ?? 0
           const percent = progressPercent(sent, item.file.size)
-          const started = isSending || transfer.sendState === 'done'
+          const started = isActive || transfer.sendState === 'done'
           const status = !started
             ? null
             : progress?.done
               ? '100%'
               : isPaused && item.id === active?.id
                 ? 'paused'
-                : item.id === active?.id && isSending
+                : item.id === active?.id && isActive
                   ? `${Math.round(percent)}%`
                   : 'waiting'
           return (
@@ -131,7 +143,7 @@ export default function TransferSender({ files, transfer, getChannel }: Props) {
                   <Check size={16} className="shrink-0 text-success" aria-label="Sent" />
                 )}
               </div>
-              {(isSending || transfer.sendState === 'done') && (
+              {(isActive || transfer.sendState === 'done') && (
                 <div className="mt-2">
                   <ProgressBar value={percent} />
                 </div>
@@ -151,7 +163,7 @@ export default function TransferSender({ files, transfer, getChannel }: Props) {
         </button>
       )}
 
-      {isSending && (
+      {isActive && (
         <div className="mt-3 flex flex-col gap-2 sm:flex-row">
           {isPaused ? (
             <button
@@ -176,6 +188,32 @@ export default function TransferSender({ files, transfer, getChannel }: Props) {
             className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-border bg-white px-4 py-2.5 text-sm font-semibold hover:border-danger hover:text-danger"
           >
             <X size={15} aria-hidden /> Cancel
+          </button>
+        </div>
+      )}
+
+      {isInterrupted && (
+        <div className="mt-3 rounded-lg border border-border bg-background p-4 text-center" aria-live="polite">
+          <p className="text-sm font-semibold text-dark">
+            {channelOpen ? 'Transfer interrupted' : 'Connection interrupted'}
+          </p>
+          <p className="mx-auto mt-1 max-w-xs text-xs leading-relaxed text-muted">
+            {channelOpen
+              ? 'The link is back but the transfer could not continue yet. Your progress is preserved.'
+              : 'Attempting reconnection… your progress is preserved and the transfer will continue from the last confirmed chunk.'}
+          </p>
+          <p className="mt-2 text-xs font-medium text-dark" aria-live="polite">
+            {formatBytes(preservedBytes)} of {formatBytes(totalBytes)} preserved
+          </p>
+          <div className="mt-1">
+            <ProgressBar value={(preservedBytes / Math.max(1, totalBytes)) * 100} />
+          </div>
+          <button
+            type="button"
+            onClick={onRetry}
+            className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90"
+          >
+            <RefreshCw size={15} aria-hidden /> Retry
           </button>
         </div>
       )}

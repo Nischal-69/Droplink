@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, DragEvent } from 'react'
 import { ArrowRight, Check, Copy, Lock, Upload, X } from 'lucide-react'
 import QRCode from 'react-qr-code'
@@ -105,6 +105,39 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
     () => (pairing.code ? buildReceiveUrl(pairing.code) : ''),
     [pairing.code],
   )
+
+  // Auto-resume once per interruption episode: when the link is back, the
+  // interrupted send continues from the receiver's confirmed offsets.
+  const autoResumedRef = useRef(false)
+  const { sendState: cardSendState, resumeTransfer: cardResumeTransfer } = transfer
+  const { rtcStatus: cardRtcStatus, getChannel: cardGetChannel } = webrtc
+  useEffect(() => {
+    if (cardSendState !== 'interrupted') {
+      autoResumedRef.current = false
+      return
+    }
+    if (cardRtcStatus !== 'open' || autoResumedRef.current) return
+    autoResumedRef.current = true
+    void cardResumeTransfer(cardGetChannel())
+  }, [cardSendState, cardResumeTransfer, cardRtcStatus, cardGetChannel])
+
+  /** Manual recovery: resume now when the link is open, otherwise reconnect first. */
+  const handleTransferRetry = () => {
+    const channel = webrtc.getChannel()
+    if (channel && channel.readyState === 'open') {
+      autoResumedRef.current = true
+      void transfer.resumeTransfer(channel)
+    } else {
+      // Let the next reconnect trigger the auto-resume above.
+      autoResumedRef.current = false
+      webrtc.retry()
+    }
+  }
+
+  const transferActive =
+    transfer.sendState === 'sending' ||
+    transfer.sendState === 'resuming' ||
+    transfer.sendState === 'interrupted'
 
   return (
     <section
@@ -214,11 +247,15 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
                   rtcStatus={webrtc.rtcStatus}
                   rtcError={webrtc.rtcError}
                   onRetry={webrtc.retry}
+                  transferActive={transferActive}
+                  autoRetry={webrtc.autoRetry}
                 >
                   <TransferSender
                     files={files}
                     transfer={transfer}
                     getChannel={webrtc.getChannel}
+                    channelOpen={webrtc.rtcStatus === 'open'}
+                    onRetry={handleTransferRetry}
                   />
                 </DirectConnectionPanel>
               </div>

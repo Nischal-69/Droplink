@@ -26,12 +26,14 @@ export type QueueEntry = {
 export type ControlMessage =
   | { kind: 'transfer-start'; transferId: string; fileCount: number; totalBytes: number }
   | { kind: 'queue'; transferId: string; files: QueueEntry[] }
-  | { kind: 'file-start'; transferId: string; fileId: string; name: string; size: number; mime: string }
+  | { kind: 'file-start'; transferId: string; fileId: string; name: string; size: number; mime: string; offset?: number }
   | { kind: 'file-end'; transferId: string; fileId: string }
   | { kind: 'transfer-complete'; transferId: string }
   | { kind: 'transfer-cancel'; transferId: string; fileId?: string }
   | { kind: 'transfer-pause'; transferId: string }
   | { kind: 'transfer-resume'; transferId: string }
+  | { kind: 'resume-query'; transferId: string; fileId: string }
+  | { kind: 'resume-state'; transferId: string; fileId: string; receivedBytes: number }
 
 function isValidQueueEntry(entry: unknown): entry is QueueEntry {
   if (!entry || typeof entry !== 'object') return false
@@ -45,6 +47,13 @@ function isValidQueueEntry(entry: unknown): entry is QueueEntry {
     typeof record['mime'] === 'string'
   )
 }
+
+  function isValidOffset(value: unknown): boolean {
+    return (
+      value === undefined ||
+      (typeof value === 'number' && Number.isFinite(value) && (value as number) >= 0)
+    )
+  }
 
 export function encodeControl(message: ControlMessage): string {
   return JSON.stringify(message)
@@ -80,9 +89,23 @@ export function decodeControl(raw: string): ControlMessage | null {
         return null
       }
       if (!Number.isFinite(message['size']) || (message['size'] as number) < 0) return null
+      if (!isValidOffset(message['offset'])) return null
       break
     case 'file-end':
       if (typeof message['fileId'] !== 'string') return null
+      break
+    case 'resume-query':
+      if (typeof message['fileId'] !== 'string') return null
+      break
+    case 'resume-state':
+      if (typeof message['fileId'] !== 'string') return null
+      if (
+        typeof message['receivedBytes'] !== 'number' ||
+        !Number.isFinite(message['receivedBytes']) ||
+        (message['receivedBytes'] as number) < 0
+      ) {
+        return null
+      }
       break
     case 'transfer-complete':
     case 'transfer-cancel':
@@ -152,6 +175,65 @@ export type TransferOutcome = {
   transferId: string
 }
 
+/**
+ * Thrown when the DataChannel drops mid-transfer (closed between checks,
+ * or `send()` itself throws). Distinct from genuine failures so callers
+ * can preserve progress and offer resume instead of reporting an error.
+ */
+export class TransferInterruptedError extends Error {
+  constructor(message = 'Direct connection interrupted during transfer.') {
+    super(message)
+    this.name = 'TransferInterruptedError'
+  }
+}
+
+/** Send one frame, translating a dead channel into TransferInterruptedError. */
+function sendFrame(channel: MinimalChannel, data: string | ArrayBuffer): void {
+  try {
+    ;(channel.send as (payload: string | ArrayBuffer) => void)(data)
+  } catch {
+    throw new TransferInterruptedError()
+  }
+}
+
+/** Clamp a resume offset into the valid range for a file. */
+export function clampResumeOffset(offset: number, size: number): number {
+  if (!Number.isFinite(offset) || offset < 0) return 0
+  if (!Number.isFinite(size) || size < 0) return 0
+  return Math.min(Math.floor(offset), size)
+}
+
+/**
+ * Trim stored chunks down to exactly `targetBytes`, keeping the byte prefix
+ * intact (a straddling tail chunk is sliced). Rebuilds from the front so the
+ * kept bytes are precisely the first N bytes the sender will resume after.
+ */
+export function truncateParts(
+  parts: ArrayBuffer[],
+  receivedBytes: number,
+  targetBytes: number,
+): { parts: ArrayBuffer[]; receivedBytes: number } {
+  const target = Math.max(0, Math.min(Math.floor(targetBytes), Math.floor(receivedBytes)))
+  if (target >= receivedBytes) return { parts: parts.slice(), receivedBytes }
+  const trimmed: ArrayBuffer[] = []
+  let kept = 0
+  for (const part of parts) {
+    if (kept >= target) break
+    if (kept + part.byteLength <= target) {
+      trimmed.push(part)
+      kept += part.byteLength
+    } else {
+      const need = target - kept
+      if (need > 0) {
+        trimmed.push(part.slice(0, need))
+        kept += need
+      }
+      break
+    }
+  }
+  return { parts: trimmed, receivedBytes: kept }
+}
+
 /** Short cooperative wait used while paused — keeps the loop responsive to resume/cancel. */
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => globalThis.setTimeout(resolve, ms))
@@ -160,12 +242,18 @@ function delay(ms: number): Promise<void> {
 /**
  * Stream files over an open channel: metadata first, then 64 KiB chunks
  * with backpressure. Reads one slice at a time so huge files are never
- * fully loaded. Throws when the channel closes mid-transfer.
+ * fully loaded. Throws TransferInterruptedError when the channel drops
+ * mid-transfer (preserving nothing here — callers keep offsets); throws
+ * any other failure as a plain Error.
  *
  * Pause is real, not cosmetic: while `isPaused()` is true the loop emits
  * no chunk frames at all and holds its exact byte offset, so resume
  * continues from the same offset. Cancel (via `isAborted()`) is honored
  * even while paused so a paused transfer can still be stopped cleanly.
+ *
+ * `startOffsets[fileId]` resumes a file mid-stream (recovery): the
+ * file-start frame carries the offset and chunks begin there, so bytes
+ * the receiver already confirmed are never re-sent.
  */
 export async function transferFiles(
   channel: MinimalChannel,
@@ -176,24 +264,28 @@ export async function transferFiles(
     onProgress?: (fileId: string, sentBytes: number, done: boolean) => void
     transferId?: string
     onTransferId?: (transferId: string) => void
+    startOffsets?: Record<string, number>
   },
 ): Promise<TransferOutcome> {
   if (channel.readyState !== 'open') {
-    throw new Error('Direct connection is not open.')
+    throw new TransferInterruptedError('Direct connection is not open.')
   }
   const transferId = options?.transferId ?? makeTransferId('tx')
   const aborted = options?.isAborted ?? (() => false)
   const paused = options?.isPaused ?? (() => false)
   const report = options?.onProgress ?? (() => undefined)
+  const offsets = options?.startOffsets ?? {}
   options?.onTransferId?.(transferId)
   const totalBytes = files.reduce((sum, item) => sum + item.file.size, 0)
   channel.bufferedAmountLowThreshold = LOW_WATER_MARK
 
-  channel.send(
+  sendFrame(
+    channel,
     encodeControl({ kind: 'transfer-start', transferId, fileCount: files.length, totalBytes }),
   )
   // Full manifest up front so the receiver sees the complete queue immediately.
-  channel.send(
+  sendFrame(
+    channel,
     encodeControl({
       kind: 'queue',
       transferId,
@@ -212,7 +304,9 @@ export async function transferFiles(
       await delay(50)
     }
     if (aborted()) break
-    channel.send(
+    const startOffset = clampResumeOffset(offsets[fileId] ?? 0, file.size)
+    sendFrame(
+      channel,
       encodeControl({
         kind: 'file-start',
         transferId,
@@ -220,10 +314,11 @@ export async function transferFiles(
         name: file.name,
         size: file.size,
         mime: file.type || 'application/octet-stream',
+        offset: startOffset,
       }),
     )
-    let offset = 0
-    report(fileId, 0, file.size === 0)
+    let offset = startOffset
+    report(fileId, offset, offset >= file.size)
     while (offset < file.size) {
       if (aborted()) break
       // Real pause: hold the exact offset and emit nothing until resumed.
@@ -232,7 +327,7 @@ export async function transferFiles(
       }
       if (aborted()) break
       if (channel.readyState !== 'open') {
-        throw new Error('Direct connection closed during transfer.')
+        throw new TransferInterruptedError('Direct connection closed during transfer.')
       }
       await waitForDrain(channel)
       if (aborted()) break
@@ -240,21 +335,21 @@ export async function transferFiles(
       if (paused()) continue
       const end = Math.min(offset + CHUNK_SIZE, file.size)
       const chunk = await file.slice(offset, end).arrayBuffer()
-      channel.send(chunk)
+      sendFrame(channel, chunk)
       offset = end
       report(fileId, offset, false)
     }
     if (aborted()) {
-      channel.send(encodeControl({ kind: 'transfer-cancel', transferId, fileId }))
+      sendFrame(channel, encodeControl({ kind: 'transfer-cancel', transferId, fileId }))
       break
     }
-    channel.send(encodeControl({ kind: 'file-end', transferId, fileId }))
+    sendFrame(channel, encodeControl({ kind: 'file-end', transferId, fileId }))
     report(fileId, file.size, true)
   }
   if (aborted()) {
-    channel.send(encodeControl({ kind: 'transfer-cancel', transferId }))
+    sendFrame(channel, encodeControl({ kind: 'transfer-cancel', transferId }))
     return { status: 'cancelled', transferId }
   }
-  channel.send(encodeControl({ kind: 'transfer-complete', transferId }))
+  sendFrame(channel, encodeControl({ kind: 'transfer-complete', transferId }))
   return { status: 'done', transferId }
 }
