@@ -138,6 +138,10 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
     () => (pairing.code ? buildReceiveUrl(pairing.code) : ''),
     [pairing.code],
   )
+  // A localhost QR cannot be opened by phones — nudge toward the LAN address.
+  const isLocalhostUrl =
+    typeof window !== 'undefined' &&
+    (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
 
   // Auto-resume once per interruption episode: when the link is back, the
   // interrupted send continues from the receiver's confirmed offsets.
@@ -346,6 +350,13 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
                   <p className="mx-auto mt-2 max-w-xs text-xs leading-relaxed text-muted">
                     Scan with the receiver&apos;s camera to open the DropLink connection page.
                   </p>
+                  {isLocalhostUrl && (
+                    <p className="mx-auto mt-2 max-w-xs text-xs leading-relaxed text-muted" role="note">
+                      You opened this page via localhost, so phones can&apos;t use this QR.
+                      Reopen it via your LAN address (e.g. http://192.168.1.72:5173) and get
+                      a fresh code.
+                    </p>
+                  )}
                   <div className="mx-auto mt-4 flex max-w-xs items-center gap-3" aria-hidden>
                     <span className="h-px flex-1 bg-border" />
                     <span className="text-xs font-semibold uppercase tracking-wide text-muted">
