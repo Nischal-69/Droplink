@@ -9,7 +9,7 @@ export default function Header() {
           <span className="text-base font-bold tracking-tight text-dark">
             DropLink
           </span>
-          <span className="rounded-lg bg-primary/10 px-2 py-1 text-[11px] font-semibold text-primary">
+          <span className="rounded-lg bg-primary/10 px-2 py-1 text-xs font-semibold text-primary">
             Private P2P
           </span>
         </div>

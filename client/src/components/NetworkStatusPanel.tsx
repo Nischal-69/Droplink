@@ -146,7 +146,7 @@ export default function NetworkStatusPanel({ status, localRole, localDevice, pee
 
       <dl className="mx-auto mt-3 grid max-w-xs grid-cols-1 gap-2 text-left min-[400px]:grid-cols-2">
         <div className="rounded-lg border border-border bg-white px-3 py-2">
-          <dt className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+          <dt className="text-xs font-semibold uppercase tracking-wide text-muted">
             {localTitle} • this device
           </dt>
           <dd className="mt-0.5 truncate text-sm font-semibold text-dark" title={localDevice}>
@@ -154,7 +154,7 @@ export default function NetworkStatusPanel({ status, localRole, localDevice, pee
           </dd>
         </div>
         <div className="rounded-lg border border-border bg-white px-3 py-2">
-          <dt className="text-[11px] font-semibold uppercase tracking-wide text-muted">{peerRole}</dt>
+          <dt className="text-xs font-semibold uppercase tracking-wide text-muted">{peerRole}</dt>
           <dd
             className={`mt-0.5 truncate text-sm font-semibold ${peerDevice ? 'text-dark' : 'text-muted'}`}
             title={peerDevice ?? undefined}

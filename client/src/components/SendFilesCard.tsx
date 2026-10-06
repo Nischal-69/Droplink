@@ -175,7 +175,7 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
   return (
     <section
       aria-label="Send files"
-      className="mt-8 w-full rounded-xl border border-border bg-white p-4 sm:p-8"
+      className="mt-8 w-full rounded-xl border border-border bg-white p-4 sm:p-6"
     >
       <div className="flex items-center justify-center gap-2">
         <h2 className="text-center text-lg font-semibold">Send files</h2>
@@ -195,7 +195,7 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
             onDragLeave={() => setDragging(false)}
             onDrop={handleDrop}
             aria-label="Select files by browsing or dropping them here"
-            className={`mt-5 w-full rounded-lg border border-dashed px-4 py-10 text-center transition-colors sm:py-8 ${
+            className={`mt-5 w-full rounded-lg border border-dashed px-4 py-10 text-center sm:py-8 ${
               dragging ? 'border-primary bg-primary/5' : 'border-border bg-background'
             }`}
           >
@@ -207,7 +207,7 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
             <span className="mt-1 hidden text-sm text-muted sm:block">or browse your device</span>
             <span className="mt-1 block text-sm text-muted sm:hidden">Photos, videos, documents</span>
             <span className="mt-3 block text-xs text-muted">
-              Your files are transferred directly.
+              Files stay on this device until sent.
             </span>
           </button>
 
@@ -244,7 +244,7 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
                       aria-label={`Remove ${item.file.name}`}
                       className="inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-lg p-1.5 text-muted hover:bg-white hover:text-danger"
                     >
-                      <X size={18} aria-hidden />
+                      <X size={16} aria-hidden />
                     </button>
                   </li>
                 ))}
@@ -348,7 +348,7 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
                   </p>
                   <div className="mx-auto mt-4 flex max-w-xs items-center gap-3" aria-hidden>
                     <span className="h-px flex-1 bg-border" />
-                    <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-muted">
                       Or enter code manually
                     </span>
                     <span className="h-px flex-1 bg-border" />
@@ -360,30 +360,30 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
                     <button
                       type="button"
                       onClick={handleCopyCode}
-                      className="inline-flex min-h-[44px] flex-1 items-center justify-center gap-1.5 rounded-lg border border-border bg-white px-4 py-2 text-sm font-semibold hover:border-primary hover:text-primary"
+                      className="inline-flex min-h-[44px] flex-1 items-center justify-center gap-1.5 rounded-lg border border-border bg-white px-4 py-2.5 text-sm font-semibold hover:border-primary hover:text-primary"
                     >
                       {copied ? (
                         <>
-                          <Check size={15} aria-hidden /> Copied
+                          <Check size={16} aria-hidden /> Copied
                         </>
                       ) : (
                         <>
-                          <Copy size={15} aria-hidden /> Copy Code
+                          <Copy size={16} aria-hidden /> Copy Code
                         </>
                       )}
                     </button>
                     <button
                       type="button"
                       onClick={handleShareLink}
-                      className="inline-flex min-h-[44px] flex-1 items-center justify-center gap-1.5 rounded-lg bg-dark px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
+                      className="inline-flex min-h-[44px] flex-1 items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90"
                     >
                       {linkCopied ? (
                         <>
-                          <Check size={15} aria-hidden /> Link copied
+                          <Check size={16} aria-hidden /> Link copied
                         </>
                       ) : (
                         <>
-                          <Share2 size={15} aria-hidden />{' '}
+                          <Share2 size={16} aria-hidden />{' '}
                           {canNativeShare ? 'Share link' : 'Copy link'}
                         </>
                       )}
@@ -436,11 +436,8 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
       </div>
 
       <p className="mt-5 flex items-start justify-center gap-1.5 text-center text-xs leading-relaxed text-muted">
-        <Lock size={13} className="mt-0.5 shrink-0" aria-hidden />
-        No cloud storage. No file uploads. Direct device-to-device transfer.
-      </p>
-      <p className="mt-1 text-center text-xs leading-relaxed text-muted">
-        Your files are transferred directly between devices.
+        <Lock size={14} className="mt-0.5 shrink-0" aria-hidden />
+        No cloud storage · Direct transfer
       </p>
     </section>
   )

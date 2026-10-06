@@ -130,7 +130,7 @@ export default function ReceiveFilesCard({ onSwitchToSend, initialCode = '' }: P
   return (
     <section
       aria-label="Receive files"
-      className="mt-8 w-full rounded-xl border border-border bg-white p-4 sm:p-8"
+      className="mt-8 w-full rounded-xl border border-border bg-white p-4 sm:p-6"
     >
       <div className="flex items-center justify-center gap-2">
         <h2 className="text-center text-lg font-semibold">Receive files</h2>
@@ -141,7 +141,7 @@ export default function ReceiveFilesCard({ onSwitchToSend, initialCode = '' }: P
       </p>
       {!online && <OfflineBanner />}
 
-      <div className="mt-5 rounded-lg border border-border bg-background px-3 py-5 sm:px-4 sm:py-6">
+      <div className="mt-5 rounded-lg border border-border bg-background p-4 sm:p-6">
         <DeviceIllustration />
 
         {isConnected && pairing.code ? (
@@ -253,11 +253,8 @@ export default function ReceiveFilesCard({ onSwitchToSend, initialCode = '' }: P
       </div>
 
       <p className="mt-5 flex items-start justify-center gap-1.5 text-center text-xs leading-relaxed text-muted">
-        <Lock size={13} className="mt-0.5 shrink-0" aria-hidden />
-        No cloud storage. No file uploads. Direct device-to-device transfer.
-      </p>
-      <p className="mt-1 text-center text-xs leading-relaxed text-muted">
-        Your files are transferred directly between devices.
+        <Lock size={14} className="mt-0.5 shrink-0" aria-hidden />
+        No cloud storage · Direct transfer
       </p>
     </section>
   )

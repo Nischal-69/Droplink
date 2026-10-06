@@ -4,6 +4,7 @@ import { friendlyError } from '../utils/appErrors'
 import { formatBytes } from '../utils/formatBytes'
 import { formatEta, formatSpeed, progressPercent } from '../utils/transferStats'
 import FileTypeIcon from './FileTypeIcon'
+import ProgressBar from './ProgressBar'
 
 type Props = {
   files: { id: string; file: File }[]
@@ -13,21 +14,6 @@ type Props = {
   channelOpen: boolean
   /** Retry recovery: resume from confirmed offsets, or reconnect first. */
   onRetry: () => void
-}
-
-function ProgressBar({ value, tall }: { value: number; tall?: boolean }) {
-  const clamped = Math.min(100, Math.max(0, Math.round(value)))
-  return (
-    <div
-      role="progressbar"
-      aria-valuemin={0}
-      aria-valuemax={100}
-      aria-valuenow={clamped}
-      className={`w-full overflow-hidden rounded-full bg-background ring-1 ring-border ${tall ? 'h-3 sm:h-2.5' : 'h-1.5'}`}
-    >
-      <div className="h-full rounded-full bg-primary" style={{ width: `${clamped}%` }} />
-    </div>
-  )
 }
 
 /** Sender transfer UI with real byte-driven progress — shown once the channel is open. */
@@ -80,7 +66,7 @@ export default function TransferSender({ files, transfer, getChannel, channelOpe
           {isPaused ? (
             'Paused — no chunks are being sent. Progress is preserved.'
           ) : isResuming ? (
-            'Resuming from the last confirmed chunk — already-received bytes are not re-sent.'
+            'Resuming from the last confirmed chunk.'
           ) : (
             <>
               Speed: {bps > 0 ? formatSpeed(bps) : 'measuring…'} • Time remaining:{' '}
@@ -161,7 +147,7 @@ export default function TransferSender({ files, transfer, getChannel, channelOpe
           onClick={handleSend}
           className="mt-3 inline-flex min-h-[48px] w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90"
         >
-          <Send size={15} aria-hidden /> Send {files.length === 1 ? 'file' : `${files.length} files`}
+          <Send size={16} aria-hidden /> Send {files.length === 1 ? 'file' : `${files.length} files`}
         </button>
       )}
 
@@ -173,7 +159,7 @@ export default function TransferSender({ files, transfer, getChannel, channelOpe
               onClick={() => transfer.resumeSend(getChannel())}
               className="inline-flex min-h-[48px] flex-1 items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90"
             >
-              <Play size={15} aria-hidden /> Resume
+              <Play size={16} aria-hidden /> Resume
             </button>
           ) : (
             <button
@@ -181,7 +167,7 @@ export default function TransferSender({ files, transfer, getChannel, channelOpe
               onClick={() => transfer.pauseSend(getChannel())}
               className="inline-flex min-h-[48px] flex-1 items-center justify-center gap-1.5 rounded-lg border border-border bg-white px-4 py-2.5 text-sm font-semibold hover:border-primary hover:text-primary"
             >
-              <Pause size={15} aria-hidden /> Pause
+              <Pause size={16} aria-hidden /> Pause
             </button>
           )}
           <button
@@ -189,7 +175,7 @@ export default function TransferSender({ files, transfer, getChannel, channelOpe
             onClick={transfer.cancelSend}
             className="inline-flex min-h-[48px] flex-1 items-center justify-center gap-1.5 rounded-lg border border-border bg-white px-4 py-2.5 text-sm font-semibold hover:border-danger hover:text-danger"
           >
-            <X size={15} aria-hidden /> Cancel
+            <X size={16} aria-hidden /> Cancel
           </button>
         </div>
       )}
@@ -202,7 +188,7 @@ export default function TransferSender({ files, transfer, getChannel, channelOpe
           <p className="mx-auto mt-1 max-w-xs text-xs leading-relaxed text-muted">
             {channelOpen
               ? 'The link is back but the transfer could not continue yet. Your progress is preserved.'
-              : 'Attempting reconnection… your progress is preserved and the transfer will continue from the last confirmed chunk.'}
+              : 'Attempting reconnection… Progress is preserved.'}
           </p>
           <p className="mt-2 text-xs font-medium text-dark" aria-live="polite">
             {formatBytes(preservedBytes)} of {formatBytes(totalBytes)} preserved
@@ -215,14 +201,14 @@ export default function TransferSender({ files, transfer, getChannel, channelOpe
             onClick={onRetry}
             className="mt-3 inline-flex min-h-[48px] w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90"
           >
-            <RefreshCw size={15} aria-hidden /> Retry
+            <RefreshCw size={16} aria-hidden /> Retry
           </button>
         </div>
       )}
 
       {transfer.sendState === 'done' && (
         <p className="mt-3 flex items-center justify-center gap-1.5 text-sm font-medium text-success">
-          <Check size={15} aria-hidden /> Transfer complete
+          <Check size={16} aria-hidden /> Transfer complete
         </p>
       )}
 
@@ -234,7 +220,7 @@ export default function TransferSender({ files, transfer, getChannel, channelOpe
             onClick={handleSend}
             className="mt-2 inline-flex min-h-[48px] w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90"
           >
-            <RefreshCw size={15} aria-hidden /> Send again
+            <RefreshCw size={16} aria-hidden /> Send again
           </button>
         </div>
       )}
@@ -254,7 +240,7 @@ export default function TransferSender({ files, transfer, getChannel, channelOpe
             onClick={handleSend}
             className="mt-2 inline-flex min-h-[48px] w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90"
           >
-            <RefreshCw size={15} aria-hidden /> Retry transfer
+            <RefreshCw size={16} aria-hidden /> Retry transfer
           </button>
         </div>
       )}

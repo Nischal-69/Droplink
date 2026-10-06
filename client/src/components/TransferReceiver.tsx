@@ -7,21 +7,7 @@ import { sanitizeDisplayName } from '../utils/transferProtocol'
 import { progressPercent } from '../utils/transferStats'
 import { createZipBlob, defaultZipName, triggerBlobDownload } from '../utils/zipFiles'
 import FileTypeIcon from './FileTypeIcon'
-
-function ProgressBar({ value, tall }: { value: number; tall?: boolean }) {
-  const clamped = Math.min(100, Math.max(0, Math.round(value)))
-  return (
-    <div
-      role="progressbar"
-      aria-valuemin={0}
-      aria-valuemax={100}
-      aria-valuenow={clamped}
-      className={`w-full overflow-hidden rounded-full bg-background ring-1 ring-border ${tall ? 'h-3 sm:h-2.5' : 'h-1.5'}`}
-    >
-      <div className="h-full rounded-full bg-primary" style={{ width: `${clamped}%` }} />
-    </div>
-  )
-}
+import ProgressBar from './ProgressBar'
 
 /** Resolve the reconstructed bytes kept locally (never fetched from a server). */
 async function resolveBlob(item: ReceivedFile): Promise<Blob | null> {
@@ -142,7 +128,7 @@ export default function TransferReceiver({
           <button
             type="button"
             onClick={transfer.dismissReceiveError}
-            className="mt-2 inline-flex min-h-[48px] w-full items-center justify-center gap-1.5 rounded-lg border border-border bg-white px-4 py-2 text-sm font-semibold hover:border-primary hover:text-primary"
+            className="mt-2 inline-flex min-h-[48px] w-full items-center justify-center gap-1.5 rounded-lg border border-border bg-white px-4 py-2.5 text-sm font-semibold hover:border-primary hover:text-primary"
           >
             Dismiss
           </button>
@@ -159,8 +145,8 @@ export default function TransferReceiver({
               {isPaused ? 'Paused by sender' : 'Receiving'}
             </p>
             {isPaused && (
-              <span className="inline-flex items-center gap-1 rounded-lg bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">
-                <Pause size={12} aria-hidden /> Paused
+              <span className="inline-flex items-center gap-1 rounded-lg bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
+                <Pause size={14} aria-hidden /> Paused
               </span>
             )}
           </div>
@@ -178,7 +164,7 @@ export default function TransferReceiver({
           </div>
           {isPaused && (
             <p className="mt-1 text-xs text-muted">
-              No data is arriving. Your received progress is preserved and resumes automatically.
+              No data is arriving. Progress is preserved.
             </p>
           )}
         </div>
@@ -190,7 +176,7 @@ export default function TransferReceiver({
           onClick={() => transfer.cancelReceive(getChannel())}
           className="mt-2 inline-flex min-h-[48px] w-full items-center justify-center gap-1.5 rounded-lg border border-border bg-white px-4 py-2.5 text-sm font-semibold hover:border-danger hover:text-danger"
         >
-          <X size={15} aria-hidden /> Cancel
+          <X size={16} aria-hidden /> Cancel
         </button>
       )}
 
@@ -205,9 +191,9 @@ export default function TransferReceiver({
             type="button"
             onClick={() => void handleDownloadAll()}
             disabled={isZipping}
-            className="mt-2 inline-flex min-h-[48px] w-full items-center justify-center gap-1.5 rounded-lg bg-dark px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-wait disabled:opacity-60"
+            className="mt-2 inline-flex min-h-[48px] w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-wait disabled:opacity-60"
           >
-            <Archive size={15} aria-hidden />
+            <Archive size={16} aria-hidden />
             {isZipping ? 'Preparing ZIP…' : 'Download All (ZIP)'}
           </button>
           {zipError && (
@@ -215,8 +201,8 @@ export default function TransferReceiver({
               {zipError}
             </p>
           )}
-          <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
-            Packaged locally in your browser — files are never uploaded to a server.
+          <p className="mt-1.5 text-xs leading-relaxed text-muted">
+            Zipped in your browser. Nothing is uploaded.
           </p>
         </div>
       )}
@@ -282,19 +268,19 @@ export default function TransferReceiver({
                   <a
                     href={item.blobUrl}
                     download={item.name}
-                    className="mt-2 inline-flex min-h-[48px] w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
+                    className="mt-2 inline-flex min-h-[48px] w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90"
                     aria-label={`Download ${displayName}`}
                   >
-                    <Download size={15} aria-hidden /> Download
+                    <Download size={16} aria-hidden /> Download
                   </a>
                 ) : (
                   <button
                     type="button"
                     onClick={() => handleSingleDownload(item)}
-                    className="mt-2 inline-flex min-h-[48px] w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
+                    className="mt-2 inline-flex min-h-[48px] w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90"
                     aria-label={`Download ${displayName}`}
                   >
-                    <Download size={15} aria-hidden /> Download
+                    <Download size={16} aria-hidden /> Download
                   </button>
                 ))}
             </li>

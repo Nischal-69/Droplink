@@ -79,7 +79,7 @@ export default function DirectConnectionPanel({
             onClick={onRetry}
             className="mx-auto mt-3 inline-flex min-h-[48px] items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
           >
-            <RefreshCw size={15} aria-hidden /> {exhausted ? 'Retry' : 'Retry connection'}
+            <RefreshCw size={16} aria-hidden /> {exhausted ? 'Retry' : 'Retry connection'}
           </button>
         )}
       </div>
@@ -93,7 +93,7 @@ export default function DirectConnectionPanel({
         Establishing direct connection...
       </p>
       <p className="mx-auto mt-1 max-w-xs text-xs leading-relaxed text-muted">
-        Exchanging connection info via the signaling server. No file data leaves your device.
+        Exchanging connection info. No file data leaves your device.
       </p>
     </div>
   )
