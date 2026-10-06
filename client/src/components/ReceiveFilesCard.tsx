@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
 import { Lock } from 'lucide-react'
 import DirectConnectionPanel from './DirectConnectionPanel'
@@ -7,9 +7,12 @@ import TransferReceiver from './TransferReceiver'
 import { useFileTransfer } from '../hooks/useFileTransfer'
 import { usePairing } from '../hooks/usePairing'
 import { useWebRTC } from '../hooks/useWebRTC'
+import { isValidPairingCode, normalizePairingCode } from '../utils/pairingLink'
 
 type Props = {
   onSwitchToSend: () => void
+  /** Code from a scanned QR link (`?mode=receive&code=…`) — manual entry stays available. */
+  initialCode?: string
 }
 
 function formatCodeInput(digits: string): string {
@@ -71,9 +74,10 @@ function DeviceIllustration() {
 }
 
 /** Receive screen — enter the sender's code to pair (signaling only). */
-export default function ReceiveFilesCard({ onSwitchToSend }: Props) {
+export default function ReceiveFilesCard({ onSwitchToSend, initialCode = '' }: Props) {
   const pairing = usePairing()
-  const [digits, setDigits] = useState('')
+  const [digits, setDigits] = useState(() => normalizePairingCode(initialCode))
+  const autoJoinedRef = useRef(false)
   const isConnected = pairing.status === 'connected'
   const transfer = useFileTransfer()
   const webrtc = useWebRTC({
@@ -83,6 +87,14 @@ export default function ReceiveFilesCard({ onSwitchToSend }: Props) {
     active: isConnected,
     onMessage: transfer.handleChannelMessage,
   })
+
+  // A scanned QR link opens this page with the code prefilled — connect automatically once.
+  useEffect(() => {
+    if (autoJoinedRef.current || !isValidPairingCode(initialCode)) return
+    autoJoinedRef.current = true
+    void pairing.joinRoom(initialCode)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const handleInputChange = (event: ChangeEvent<HTMLInputElement>) => {
     setDigits(event.target.value.replace(/\D/g, '').slice(0, 6))
@@ -145,7 +157,9 @@ export default function ReceiveFilesCard({ onSwitchToSend }: Props) {
               htmlFor="receive-code"
               className="text-xs font-medium uppercase tracking-wide text-muted"
             >
-              Sender&apos;s connection code
+              {isValidPairingCode(initialCode)
+                ? 'Code from QR — or enter code manually'
+                : 'Or enter code manually'}
             </label>
             <input
               id="receive-code"

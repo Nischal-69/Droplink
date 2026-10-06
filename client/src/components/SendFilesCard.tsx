@@ -1,6 +1,7 @@
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, DragEvent } from 'react'
 import { ArrowRight, Check, Copy, Lock, Upload, X } from 'lucide-react'
+import QRCode from 'react-qr-code'
 import DirectConnectionPanel from './DirectConnectionPanel'
 import FileTypeIcon from './FileTypeIcon'
 import PairingStatusBadge from './PairingStatusBadge'
@@ -9,6 +10,7 @@ import { useFileTransfer } from '../hooks/useFileTransfer'
 import { usePairing } from '../hooks/usePairing'
 import { useWebRTC } from '../hooks/useWebRTC'
 import { formatBytes } from '../utils/formatBytes'
+import { buildReceiveUrl } from '../utils/pairingLink'
 
 type StoredFile = {
   id: string
@@ -97,6 +99,11 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
 
   const totalBytes = files.reduce((sum, item) => sum + item.file.size, 0)
   const summary = `${files.length} ${files.length === 1 ? 'file' : 'files'} • ${formatBytes(totalBytes)}`
+  // QR payload is connection info only (receive URL + code) — never file contents.
+  const pairingUrl = useMemo(
+    () => (pairing.code ? buildReceiveUrl(pairing.code) : ''),
+    [pairing.code],
+  )
 
   return (
     <section
@@ -227,7 +234,7 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
           ) : (
             <>
               <p className="text-xs font-medium uppercase tracking-wide text-muted">
-                {pairing.status === 'connecting' ? 'Connecting' : 'Share this code'}
+                {pairing.status === 'connecting' ? 'Connecting' : 'Scan to connect'}
               </p>
               {pairing.status === 'connecting' || !pairing.code ? (
                 <p className="mt-3 flex items-center justify-center gap-2 text-sm text-muted">
@@ -239,7 +246,28 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
                 </p>
               ) : (
                 <>
-                  <p className="mt-1 font-mono text-4xl font-bold tracking-widest text-dark">
+                  {pairingUrl && (
+                    <div className="mx-auto mt-4 w-fit rounded-xl border border-border bg-white p-3">
+                      <QRCode
+                        value={pairingUrl}
+                        size={168}
+                        bgColor="#FFFFFF"
+                        fgColor="#0F172A"
+                        aria-label={`QR code to connect to this transfer (code ${pairing.code})`}
+                      />
+                    </div>
+                  )}
+                  <p className="mx-auto mt-2 max-w-xs text-xs leading-relaxed text-muted">
+                    Scan with the receiver&apos;s camera to open the DropLink connection page.
+                  </p>
+                  <div className="mx-auto mt-4 flex max-w-xs items-center gap-3" aria-hidden>
+                    <span className="h-px flex-1 bg-border" />
+                    <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+                      Or enter code manually
+                    </span>
+                    <span className="h-px flex-1 bg-border" />
+                  </div>
+                  <p className="mt-3 font-mono text-4xl font-bold tracking-widest text-dark">
                     {pairing.code}
                   </p>
                   <button
