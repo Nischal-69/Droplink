@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { io, type Socket } from 'socket.io-client'
+import {
+  classifySignalFailure,
+  codeFromServerMessage,
+  type ErrorCode,
+} from '../utils/appErrors'
 import { getLocalDeviceLabel, sanitizeDeviceLabel } from '../utils/deviceInfo'
 
 export type PairingStatus = 'idle' | 'connecting' | 'waiting' | 'connected' | 'disconnected'
@@ -37,11 +42,16 @@ export function usePairing() {
   const [role, setRole] = useState<PairingRole>(null)
   const [roomId, setRoomId] = useState<string | null>(null)
   const [code, setCode] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  /** User-facing failure code only — technical detail goes to console.debug. */
+  const [errorCode, setErrorCode] = useState<ErrorCode | null>(null)
   /** This device's friendly label, e.g. "Chrome on Windows". */
   const [localDevice] = useState(() => getLocalDeviceLabel())
   /** The paired peer's friendly label, e.g. "Chrome on Android" (null until joined). */
   const [peerDevice, setPeerDevice] = useState<string | null>(null)
+  const statusRef = useRef<PairingStatus>('idle')
+  useEffect(() => {
+    statusRef.current = status
+  }, [status])
 
   const ensureSocket = useCallback((): Promise<Socket> => {
     const existing = socketRef.current
@@ -78,21 +88,26 @@ export function usePairing() {
 
     socket.on('peer-joined', (payload: PeerJoinedPayload) => {
       setStatus('connected')
-      setError(null)
+      setErrorCode(null)
       setPeerDevice(sanitizeDeviceLabel(payload?.device))
     })
 
     socket.on('peer-disconnected', () => {
       setStatus('disconnected')
+      setErrorCode('peer-disconnected')
     })
 
     socket.on('room-expired', () => {
       setStatus('disconnected')
-      setError('This code has expired. Create a new one and try again.')
+      setErrorCode('code-expired')
     })
 
     socket.on('disconnect', () => {
-      setStatus((prev) => (prev === 'connected' || prev === 'waiting' ? 'disconnected' : prev))
+      const prev = statusRef.current
+      if (prev === 'connected' || prev === 'waiting') {
+        setStatus('disconnected')
+        setErrorCode(classifySignalFailure(new Error('signaling socket disconnected')))
+      }
     })
 
     socketRef.current = socket
@@ -122,7 +137,7 @@ export function usePairing() {
 
   const createRoom = useCallback(async () => {
     setStatus('connecting')
-    setError(null)
+    setErrorCode(null)
     setRole('sender')
     try {
       const socket = await ensureSocket()
@@ -134,14 +149,16 @@ export function usePairing() {
         })
       })
       if (!res.ok || !res.roomId || !res.code) {
-        throw new Error(res.error ?? 'Could not create a room.')
+        setStatus('disconnected')
+        setErrorCode(codeFromServerMessage(res.error))
+        return
       }
       setRoomId(res.roomId)
       setCode(res.code)
       setStatus('waiting')
     } catch (err) {
       setStatus('disconnected')
-      setError(err instanceof Error ? err.message : 'Could not create a room.')
+      setErrorCode(classifySignalFailure(err))
     }
   }, [ensureSocket])
 
@@ -149,12 +166,12 @@ export function usePairing() {
     async (rawCode: string) => {
       const normalized = normalizeCode(rawCode)
       if (normalized.length !== 6) {
-        setError('Enter the 6-digit code from the sending device.')
+        setErrorCode('code-invalid')
         setStatus('disconnected')
         return
       }
       setStatus('connecting')
-      setError(null)
+      setErrorCode(null)
       setRole('receiver')
       try {
         const socket = await ensureSocket()
@@ -170,7 +187,9 @@ export function usePairing() {
           )
         })
         if (!res.ok || !res.roomId) {
-          throw new Error(res.error ?? 'Could not join the room.')
+          setStatus('disconnected')
+          setErrorCode(codeFromServerMessage(res.error))
+          return
         }
         setRoomId(res.roomId)
         setCode(res.code ?? rawCode)
@@ -178,7 +197,7 @@ export function usePairing() {
         setStatus('connected')
       } catch (err) {
         setStatus('disconnected')
-        setError(err instanceof Error ? err.message : 'Could not join the room.')
+        setErrorCode(classifySignalFailure(err))
       }
     },
     [ensureSocket],
@@ -190,7 +209,7 @@ export function usePairing() {
     setRole(null)
     setRoomId(null)
     setCode(null)
-    setError(null)
+    setErrorCode(null)
     setPeerDevice(null)
   }, [])
 
@@ -204,5 +223,5 @@ export function usePairing() {
     }
   }, [])
 
-  return { status, role, roomId, code, error, localDevice, peerDevice, createRoom, joinRoom, leave, getSocket }
+  return { status, role, roomId, code, errorCode, localDevice, peerDevice, createRoom, joinRoom, leave, getSocket }
 }

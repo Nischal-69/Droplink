@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Archive, Check, Download, Pause, X } from 'lucide-react'
 import type { FileTransfer, ReceivedFile } from '../hooks/useFileTransfer'
+import { friendlyError } from '../utils/appErrors'
 import { formatBytes } from '../utils/formatBytes'
 import { sanitizeDisplayName } from '../utils/transferProtocol'
 import { progressPercent } from '../utils/transferStats'
@@ -55,6 +56,7 @@ export default function TransferReceiver({
 }) {
   const [isZipping, setIsZipping] = useState(false)
   const [zipError, setZipError] = useState<string | null>(null)
+  const receiveErrorCopy = transfer.receiveErrorCode ? friendlyError(transfer.receiveErrorCode) : null
 
   if (transfer.received.length === 0) {
     return (
@@ -102,7 +104,7 @@ export default function TransferReceiver({
       }
       const zipBlob = await createZipBlob(entries)
       triggerBlobDownload(zipBlob, defaultZipName())
-    } catch (error) {
+    } catch {
       // Fall back to saving files one by one so the user still gets everything.
       try {
         for (const item of completed) {
@@ -116,15 +118,36 @@ export default function TransferReceiver({
         }
         setZipError('Could not build a ZIP — downloaded the files individually instead.')
       } catch {
-        setZipError(error instanceof Error ? error.message : 'Could not create a ZIP archive.')
+        // Saving can also fail (e.g. the browser refuses a huge Blob):
+        // keep the plain message, the files themselves are untouched.
+        setZipError('Could not create a ZIP archive.')
       }
     } finally {
-      setIsZipping(false)
+        setIsZipping(false)
     }
   }
 
   return (
     <div className="mt-2 text-left">
+      {receiveErrorCopy && (
+        <div className="rounded-lg border border-border bg-background p-4 text-center" aria-live="polite">
+          <p className="text-sm font-semibold text-dark" role="alert">
+            {receiveErrorCopy.title}
+          </p>
+          {receiveErrorCopy.hint && (
+            <p className="mx-auto mt-1 max-w-xs text-xs leading-relaxed text-muted">
+              {receiveErrorCopy.hint}
+            </p>
+          )}
+          <button
+            type="button"
+            onClick={transfer.dismissReceiveError}
+            className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-border bg-white px-4 py-2 text-sm font-semibold hover:border-primary hover:text-primary"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
       {active && (
         <div
           className="rounded-lg border border-border bg-background p-4"

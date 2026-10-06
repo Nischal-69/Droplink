@@ -3,11 +3,14 @@ import type { ChangeEvent, FormEvent } from 'react'
 import { Lock } from 'lucide-react'
 import DirectConnectionPanel from './DirectConnectionPanel'
 import NetworkStatusPanel from './NetworkStatusPanel'
+import OfflineBanner from './OfflineBanner'
 import PairingStatusBadge from './PairingStatusBadge'
 import TransferReceiver from './TransferReceiver'
 import { useFileTransfer } from '../hooks/useFileTransfer'
+import { useOnlineStatus } from '../hooks/useOnlineStatus'
 import { usePairing } from '../hooks/usePairing'
 import { useWebRTC } from '../hooks/useWebRTC'
+import { friendlyError } from '../utils/appErrors'
 import { isValidPairingCode, normalizePairingCode } from '../utils/pairingLink'
 
 type Props = {
@@ -79,6 +82,8 @@ export default function ReceiveFilesCard({ onSwitchToSend, initialCode = '' }: P
   const pairing = usePairing()
   const [digits, setDigits] = useState(() => normalizePairingCode(initialCode))
   const autoJoinedRef = useRef(false)
+  const online = useOnlineStatus()
+  const pairingErrorCopy = pairing.errorCode ? friendlyError(pairing.errorCode) : null
   const isConnected = pairing.status === 'connected'
   const transfer = useFileTransfer()
   const webrtc = useWebRTC({
@@ -134,6 +139,7 @@ export default function ReceiveFilesCard({ onSwitchToSend, initialCode = '' }: P
       <p className="mt-1 text-center text-sm text-muted">
         Connect with a device on the same network.
       </p>
+      {!online && <OfflineBanner />}
 
       <div className="mt-5 rounded-lg border border-border bg-background px-4 py-6">
         <DeviceIllustration />
@@ -152,7 +158,7 @@ export default function ReceiveFilesCard({ onSwitchToSend, initialCode = '' }: P
             <div className="mt-3">
               <DirectConnectionPanel
                 rtcStatus={webrtc.rtcStatus}
-                rtcError={webrtc.rtcError}
+                rtcErrorCode={webrtc.rtcErrorCode}
                 onRetry={webrtc.retry}
                 transferActive={transfer.received.some((item) => !item.done && !item.cancelled)}
                 autoRetry={webrtc.autoRetry}
@@ -189,10 +195,15 @@ export default function ReceiveFilesCard({ onSwitchToSend, initialCode = '' }: P
               disabled={isConnecting}
               className="mt-2 w-full rounded-lg border border-border bg-white px-3 py-2.5 text-center font-mono text-2xl font-bold tracking-widest text-dark placeholder:text-muted/50 focus:border-primary focus:outline-none disabled:opacity-60"
             />
-            {pairing.status === 'disconnected' && pairing.error ? (
-              <p className="mt-2 text-xs text-danger" role="alert">
-                {pairing.error}
-              </p>
+            {pairing.status === 'disconnected' && pairingErrorCopy ? (
+              <div className="mt-2" aria-live="polite">
+                <p className="text-xs font-semibold text-dark" role="alert">
+                  {pairingErrorCopy.title}
+                </p>
+                {pairingErrorCopy.hint && (
+                  <p className="mt-0.5 text-xs leading-relaxed text-muted">{pairingErrorCopy.hint}</p>
+                )}
+              </div>
             ) : (
               <p className="mt-2 flex items-center justify-center gap-2 text-sm text-muted">
                 <span
@@ -206,7 +217,8 @@ export default function ReceiveFilesCard({ onSwitchToSend, initialCode = '' }: P
             )}
             <button
               type="submit"
-              disabled={isConnecting || digits.length !== 6}
+              disabled={isConnecting || digits.length !== 6 || !online}
+              title={online ? undefined : 'You appear to be offline'}
               className="mt-3 w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isConnecting ? 'Connecting...' : 'Connect'}

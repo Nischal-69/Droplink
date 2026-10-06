@@ -5,11 +5,14 @@ import QRCode from 'react-qr-code'
 import DirectConnectionPanel from './DirectConnectionPanel'
 import FileTypeIcon from './FileTypeIcon'
 import NetworkStatusPanel from './NetworkStatusPanel'
+import OfflineBanner from './OfflineBanner'
 import PairingStatusBadge from './PairingStatusBadge'
 import TransferSender from './TransferSender'
 import { useFileTransfer } from '../hooks/useFileTransfer'
+import { useOnlineStatus } from '../hooks/useOnlineStatus'
 import { usePairing } from '../hooks/usePairing'
 import { useWebRTC } from '../hooks/useWebRTC'
+import { friendlyError } from '../utils/appErrors'
 import { formatBytes } from '../utils/formatBytes'
 import { buildReceiveUrl } from '../utils/pairingLink'
 
@@ -31,6 +34,8 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
   const inputRef = useRef<HTMLInputElement>(null)
   const pairing = usePairing()
   const transfer = useFileTransfer()
+  const online = useOnlineStatus()
+  const pairingErrorCopy = pairing.errorCode ? friendlyError(pairing.errorCode) : null
   const webrtc = useWebRTC({
     getSocket: pairing.getSocket,
     roomId: pairing.roomId,
@@ -148,6 +153,7 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
         <h2 className="text-center text-lg font-semibold">Send files</h2>
         {continued && <PairingStatusBadge status={pairing.status} />}
       </div>
+      {!online && <OfflineBanner />}
 
       {!continued && (
         <>
@@ -220,7 +226,9 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
               <button
                 type="button"
                 onClick={handleContinue}
-                className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90"
+                disabled={!online}
+                title={online ? undefined : 'You appear to be offline'}
+                className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Continue <ArrowRight size={16} aria-hidden />
               </button>
@@ -245,7 +253,7 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
               <div className="mt-4 border-t border-border pt-4">
                 <DirectConnectionPanel
                   rtcStatus={webrtc.rtcStatus}
-                  rtcError={webrtc.rtcError}
+                  rtcErrorCode={webrtc.rtcErrorCode}
                   onRetry={webrtc.retry}
                   transferActive={transferActive}
                   autoRetry={webrtc.autoRetry}
@@ -261,19 +269,25 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
               </div>
             </>
           ) : pairing.status === 'disconnected' ? (
-            <>
-              <p className="text-sm font-semibold text-dark">Connection lost</p>
-              <p className="mt-1 text-xs leading-relaxed text-muted">
-                {pairing.error ?? 'The other device disconnected.'}
+            <div aria-live="polite">
+              <p className="text-sm font-semibold text-dark">
+                {pairingErrorCopy?.title ?? 'The other device disconnected.'}
               </p>
+              {pairingErrorCopy?.hint && (
+                <p className="mx-auto mt-1 max-w-xs text-xs leading-relaxed text-muted">
+                  {pairingErrorCopy.hint}
+                </p>
+              )}
               <button
                 type="button"
                 onClick={() => void pairing.createRoom()}
-                className="mt-4 w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90"
+                disabled={!online}
+                title={online ? undefined : 'You appear to be offline'}
+                className="mt-4 w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Get a new code
               </button>
-            </>
+            </div>
           ) : (
             <>
               <NetworkStatusPanel
@@ -328,8 +342,13 @@ export default function SendFilesCard({ onSwitchToReceive }: Props) {
                   </button>
                 </>
               )}
-              {pairing.error && (
-                <p className="mt-2 text-xs text-danger">{pairing.error}</p>
+              {pairingErrorCopy && (
+                <div className="mt-2" aria-live="polite">
+                  <p className="text-xs font-semibold text-dark">{pairingErrorCopy.title}</p>
+                  {pairingErrorCopy.hint && (
+                    <p className="mt-0.5 text-xs leading-relaxed text-muted">{pairingErrorCopy.hint}</p>
+                  )}
+                </div>
               )}
             </>
           )}

@@ -1,5 +1,6 @@
 import { Check, Pause, Play, RefreshCw, Send, X } from 'lucide-react'
 import type { FileTransfer } from '../hooks/useFileTransfer'
+import { friendlyError } from '../utils/appErrors'
 import { formatBytes } from '../utils/formatBytes'
 import { formatEta, formatSpeed, progressPercent } from '../utils/transferStats'
 import FileTypeIcon from './FileTypeIcon'
@@ -43,6 +44,7 @@ export default function TransferSender({ files, transfer, getChannel, channelOpe
     (sum, item) => sum + Math.min(transfer.sendProgress[item.id]?.sentBytes ?? 0, item.file.size),
     0,
   )
+  const sendErrorCopy = transfer.sendErrorCode ? friendlyError(transfer.sendErrorCode) : null
 
   const handleSend = () => {
     void transfer.sendFiles(getChannel(), files)
@@ -238,10 +240,15 @@ export default function TransferSender({ files, transfer, getChannel, channelOpe
       )}
 
       {transfer.sendState === 'error' && (
-        <div className="mt-3 text-center">
-          <p className="text-xs text-danger" role="alert">
-            {transfer.sendError ?? 'Transfer failed.'}
+        <div className="mt-3 text-center" aria-live="polite">
+          <p className="text-sm font-semibold text-dark" role="alert">
+            {sendErrorCopy?.title ?? 'Transfer failed.'}
           </p>
+          {sendErrorCopy?.hint && (
+            <p className="mx-auto mt-1 max-w-xs text-xs leading-relaxed text-muted">
+              {sendErrorCopy.hint}
+            </p>
+          )}
           <button
             type="button"
             onClick={handleSend}

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Socket } from 'socket.io-client'
+import { isBrowserOffline, logTechnical, type ErrorCode } from '../utils/appErrors'
 
 export type RtcStatus = 'idle' | 'signaling' | 'connecting' | 'open' | 'failed' | 'closed'
 export type WebRTCRole = 'sender' | 'receiver' | null
@@ -52,7 +53,8 @@ export function useWebRTC({
   onMessage: ((event: MessageEvent) => void) | null
 }) {
   const [rtcStatus, setRtcStatus] = useState<RtcStatus>('idle')
-  const [rtcError, setRtcError] = useState<string | null>(null)
+  /** User-facing failure code only — technical detail goes to console.debug. */
+  const [rtcErrorCode, setRtcErrorCode] = useState<ErrorCode | null>(null)
   const [attempt, setAttempt] = useState(0)
   const [autoRetry, setAutoRetry] = useState<AutoRetryState>({ active: false, attempt: 0, max: MAX_AUTO_RETRIES })
   const pcRef = useRef<RTCPeerConnection | null>(null)
@@ -83,14 +85,23 @@ export function useWebRTC({
   useEffect(() => {
     if (!active || !roomId || !role) {
       setRtcStatus('idle')
-      setRtcError(null)
+      setRtcErrorCode(null)
+      return
+    }
+
+    // Feature-detect WebRTC up front so unsupported browsers get a plain
+    // explanation instead of a cryptic constructor crash. No point retrying.
+    if (typeof RTCPeerConnection === 'undefined') {
+      logTechnical('webrtc unsupported', navigator?.userAgent)
+      setRtcStatus('failed')
+      setRtcErrorCode('unsupported')
       return
     }
 
     const socket = getSocket()
     if (!socket) {
       setRtcStatus('failed')
-      setRtcError('Signaling socket is not available.')
+      setRtcErrorCode('unreachable')
       return
     }
 
@@ -99,9 +110,10 @@ export function useWebRTC({
     const pc = new RTCPeerConnection(RTC_CONFIG)
     pcRef.current = pc
 
-    const fail = (message: string) => {
+    const fail = (code: ErrorCode, technical: string) => {
       if (disposed) return
-      setRtcError(message)
+      logTechnical('webrtc failure', technical)
+      setRtcErrorCode(isBrowserOffline() ? 'offline' : code)
       setRtcStatus('failed')
       scheduleReconnect()
     }
@@ -162,7 +174,7 @@ export function useWebRTC({
         if (disposed) return
         window.clearTimeout(watchdog)
         noteOpen()
-        setRtcError(null)
+        setRtcErrorCode(null)
         setRtcStatus('open')
       }
       channel.onclose = () => {
@@ -177,7 +189,7 @@ export function useWebRTC({
     const watchdog = window.setTimeout(() => {
       if (disposed) return
       if (channelRef.current?.readyState !== 'open') {
-        fail('Timed out establishing a direct connection. Check both devices are on the same network and retry.')
+        fail('different-network', 'Timed out establishing a direct connection.')
       }
     }, OPEN_TIMEOUT_MS)
 
@@ -223,7 +235,7 @@ export function useWebRTC({
           setAttempt((a) => a + 1)
         }
       } catch {
-        fail('Could not complete the direct-connection handshake. Retry to try again.')
+        fail('different-network', 'Could not complete the direct-connection handshake.')
       }
     }
 
@@ -241,7 +253,7 @@ export function useWebRTC({
         pc.onconnectionstatechange = () => {
           if (disposed) return
           if (pc.connectionState === 'failed') {
-            fail('Direct connection failed. Both devices must be reachable on the same network.')
+            fail('different-network', 'Direct connection failed (pc.connectionState === failed).')
           } else if (pc.connectionState === 'closed') {
             setRtcStatus('closed')
             scheduleReconnect()
@@ -264,7 +276,7 @@ export function useWebRTC({
           setRtcStatus('signaling')
         }
       } catch {
-        fail('Could not start the direct connection. Retry to try again.')
+        fail('different-network', 'Could not start the direct connection.')
       }
     }
 
@@ -294,5 +306,5 @@ export function useWebRTC({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, roomId, role, attempt])
 
-  return { rtcStatus, rtcError, retry, getChannel, autoRetry }
+  return { rtcStatus, rtcErrorCode, retry, getChannel, autoRetry }
 }

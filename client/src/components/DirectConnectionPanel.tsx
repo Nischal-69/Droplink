@@ -1,10 +1,12 @@
 import type { ReactNode } from 'react'
 import { Check, RefreshCw } from 'lucide-react'
+import { friendlyError, type ErrorCode } from '../utils/appErrors'
 import type { AutoRetryState, RtcStatus } from '../hooks/useWebRTC'
 
 type Props = {
   rtcStatus: RtcStatus
-  rtcError: string | null
+  /** User-facing failure code; technical detail stays in console.debug. */
+  rtcErrorCode: ErrorCode | null
   onRetry: () => void
   /** True when a transfer was in flight (or interrupted) as the link dropped. */
   transferActive?: boolean
@@ -24,7 +26,7 @@ type Props = {
  */
 export default function DirectConnectionPanel({
   rtcStatus,
-  rtcError,
+  rtcErrorCode,
   onRetry,
   transferActive = false,
   autoRetry = null,
@@ -43,21 +45,22 @@ export default function DirectConnectionPanel({
   }
 
   if (rtcStatus === 'failed' || rtcStatus === 'closed') {
+    const copy = rtcErrorCode ? friendlyError(rtcErrorCode) : null
     const exhausted =
       transferActive && autoRetry !== null && !autoRetry.active && autoRetry.attempt >= autoRetry.max
     const recovering = transferActive && autoRetry !== null && autoRetry.active
+    // Retrying cannot help an unsupported browser — offer guidance instead.
+    const retryable = rtcErrorCode !== 'unsupported'
     const title = exhausted
       ? 'Transfer interrupted'
       : transferActive
         ? 'Connection interrupted'
-        : rtcStatus === 'failed'
-          ? 'Connection failed'
-          : 'Connection closed'
+        : (copy?.title ?? (rtcStatus === 'failed' ? 'Connection failed' : 'Connection closed'))
     const detail = exhausted
       ? 'Reconnection attempts failed. Transfer progress is preserved — retry to resume from the last confirmed chunk.'
       : recovering
         ? `Attempting reconnection… (attempt ${autoRetry.attempt} of ${autoRetry.max})`
-        : (rtcError ?? 'The direct connection could not be established.')
+        : (copy?.hint ?? copy?.title ?? 'The direct connection could not be established.')
     return (
       <div className="text-center">
         <p className="text-sm font-semibold text-dark">{title}</p>
@@ -70,13 +73,15 @@ export default function DirectConnectionPanel({
           )}
           {detail}
         </p>
-        <button
-          type="button"
-          onClick={onRetry}
-          className="mx-auto mt-3 inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
-        >
-          <RefreshCw size={15} aria-hidden /> {exhausted ? 'Retry' : 'Retry connection'}
-        </button>
+        {retryable && (
+          <button
+            type="button"
+            onClick={onRetry}
+            className="mx-auto mt-3 inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
+          >
+            <RefreshCw size={15} aria-hidden /> {exhausted ? 'Retry' : 'Retry connection'}
+          </button>
+        )}
       </div>
     )
   }

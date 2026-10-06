@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  classifyTransferFailure,
+  type ErrorCode,
+} from '../utils/appErrors'
+import {
   PROGRESS_THROTTLE_MS,
   TransferInterruptedError,
   clampResumeOffset,
@@ -105,7 +109,10 @@ function queryResumeOffsets(
  */
 export function useFileTransfer() {
   const [sendState, setSendState] = useState<SendState>('idle')
-  const [sendError, setSendError] = useState<string | null>(null)
+  /** User-facing failure code only — technical detail goes to console.debug. */
+  const [sendErrorCode, setSendErrorCode] = useState<ErrorCode | null>(null)
+  /** Receiver-side failure (e.g. file reconstruction ran out of memory). */
+  const [receiveErrorCode, setReceiveErrorCode] = useState<ErrorCode | null>(null)
   const [sendProgress, setSendProgress] = useState<Record<string, SendProgress>>({})
   /** True while the sender has paused chunk emission (offset preserved). */
   const [sendPaused, setSendPaused] = useState(false)
@@ -161,7 +168,8 @@ export function useFileTransfer() {
     revokeAll()
     setSendProgress({})
     setSendState('idle')
-    setSendError(null)
+    setSendErrorCode(null)
+    setReceiveErrorCode(null)
     setSendPaused(false)
     setReceivePaused(false)
   }, [revokeAll])
@@ -178,10 +186,27 @@ export function useFileTransfer() {
   const finalizeFile = useCallback((fileId: string) => {
     const assembly = incomingRef.current.get(fileId)
     if (!assembly || assembly.cancelled || assembly.finalized) return
+    let blob: Blob
+    try {
+      // Assembling a huge file can exceed what the browser will allocate.
+      blob = new Blob(assembly.parts, {
+        type: assembly.mime || 'application/octet-stream',
+      })
+    } catch (error) {
+      // Free the partial buffers, reset honest progress, and surface a
+      // plain-language error. A later resend can still complete the file.
+      assembly.parts = []
+      assembly.received = 0
+      if (openFileRef.current === fileId) openFileRef.current = null
+      setReceived((prev) =>
+        prev.map((item) =>
+          item.fileId === fileId ? { ...item, receivedBytes: 0, bps: 0 } : item,
+        ),
+      )
+      setReceiveErrorCode(classifyTransferFailure(error))
+      return
+    }
     assembly.finalized = true
-    const blob = new Blob(assembly.parts, {
-      type: assembly.mime || 'application/octet-stream',
-    })
     const blobUrl = URL.createObjectURL(blob)
     assembly.parts = []
     if (openFileRef.current === fileId) openFileRef.current = null
@@ -523,6 +548,11 @@ export function useFileTransfer() {
     )
   }, [])
 
+  /** Clear the receiver-side error banner (failed partials stay resumable). */
+  const dismissReceiveError = useCallback(() => {
+    setReceiveErrorCode(null)
+  }, [])
+
   const reportSendProgress = useCallback((fileId: string, sentBytes: number, done: boolean) => {
     let slot = sendMeterRef.current
     if (!slot || slot.fileId !== fileId) {
@@ -538,7 +568,7 @@ export function useFileTransfer() {
 
   const sendFiles = useCallback(async (channel: RTCDataChannel | null, files: OutgoingFile[]) => {
     if (!channel || channel.readyState !== 'open') {
-      setSendError('Direct connection is not open.')
+      setSendErrorCode('transfer-failed')
       setSendState('error')
       return
     }
@@ -550,7 +580,7 @@ export function useFileTransfer() {
     epochRef.current += 1
     outgoingTransferIdRef.current = null
     interruptedRef.current = null
-    setSendError(null)
+    setSendErrorCode(null)
     setSendState('sending')
     setSendProgress(
       Object.fromEntries(files.map(({ id }) => [id, { sentBytes: 0, done: false, bps: 0 }])),
@@ -578,12 +608,12 @@ export function useFileTransfer() {
           files,
         }
         setSendPaused(false)
-        setSendError(null)
+        setSendErrorCode(null)
         setSendState('interrupted')
       } else {
         outgoingTransferIdRef.current = null
         interruptedRef.current = null
-        setSendError(error instanceof Error ? error.message : 'Transfer failed.')
+        setSendErrorCode(classifyTransferFailure(error))
         setSendState('error')
       }
     } finally {
@@ -607,7 +637,7 @@ export function useFileTransfer() {
     outgoingTransferIdRef.current = transferId
     sendActiveRef.current = true
     abortRef.current = false
-    setSendError(null)
+    setSendErrorCode(null)
     setSendState('resuming')
     sendMeterRef.current = null
     try {
@@ -649,7 +679,7 @@ export function useFileTransfer() {
       } else {
         interruptedRef.current = null
         outgoingTransferIdRef.current = null
-        setSendError(error instanceof Error ? error.message : 'Transfer failed.')
+        setSendErrorCode(classifyTransferFailure(error))
         setSendState('error')
       }
     } finally {
@@ -660,11 +690,12 @@ export function useFileTransfer() {
 
   return {
     sendState,
-    sendError,
+    sendErrorCode,
     sendProgress,
     sendPaused,
     received,
     receivePaused,
+    receiveErrorCode,
     sendFiles,
     resumeTransfer,
     setPeerChannel,
@@ -672,6 +703,7 @@ export function useFileTransfer() {
     resumeSend,
     cancelSend,
     cancelReceive,
+    dismissReceiveError,
     handleChannelMessage,
     reset,
   }
